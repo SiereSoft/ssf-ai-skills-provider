@@ -8,6 +8,9 @@ The **SSF AI Skill Provider** is a lightweight CLI tool that fetches and install
 
 * **Zero-Configuration:** A standalone Bash script. No Kotlin compiler, Gradle syncs or heavy binaries required.
 * **Agent-Aware:** Automatically routes Markdown rules to the correct hidden directories (e.g., `.cursor/rules/`, `.windsurf/rules/`).
+* **Native MCP Integration:** Natively speaks JSON-RPC 2.0 over stdio, allowing agents to execute tools directly (e.g., `download_skill`) rather than just reading documentation.
+* **Token Economy & Optimization:** Optional auto-minification of Markdown rules to reduce context window overhead and token costs.
+* **Integrated Security:** Built-in validation layer and skill auditing to ensure downloaded scripts are safe and follow organizational standards.
 * **Version Controlled:** Uses a centralized `versions.json` registry to ensure your local AI rules are always up to date.
 * **Deterministic Fallbacks:** Strict error handling for offline environments. No silent failures.
 
