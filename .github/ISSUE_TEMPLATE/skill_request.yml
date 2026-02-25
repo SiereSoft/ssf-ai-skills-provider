@@ -1,0 +1,26 @@
+name: New Skill Request
+description: Propose a new set of architectural rules or AI skills
+labels: ["skill-request", "new-feature"]
+body:
+  - type: textarea
+    id: skill-name
+    attributes:
+      label: Skill Name
+      description: What should the skill be called? (e.g., room-db, navigation-best-practices)
+      placeholder: name-of-the-skill
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What specific AI-grade architectural rules will this provide?
+      placeholder: Summary of what this skill includes
+    validations:
+      required: true
+  - type: textarea
+    id: draft
+    attributes:
+      label: Initial Draft (Optional)
+      description: If you have an initial draft of the rules, please paste it here or provide a link.
+      render: markdown

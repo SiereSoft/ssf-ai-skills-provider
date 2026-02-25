@@ -27,7 +27,7 @@ val agentRegistry = mapOf(
 
 val localTrackingFile = ".agent-boot-versions.json"
 // For development/testing, can be overridden by environment variable
-val remoteBaseUrl = System.getenv("AGENT_BOOT_REMOTE_URL") ?: "https://raw.githubusercontent.com/Siere/ssf-ai-skills-provider/main/remote/"
+val remoteBaseUrl = System.getenv("AGENT_BOOT_REMOTE_URL") ?: "https://raw.githubusercontent.com/Siere/ssf-ai-skills-provider/main/"
 
 @Serializable
 data class SkillInfo(
@@ -158,7 +158,7 @@ fun fetchUrl(urlString: String): String {
 }
 
 fun downloadSkill(skillName: String, fileName: String, targetDir: String) {
-    val url = "$remoteBaseUrl/$fileName"
+    val url = "$remoteBaseUrl/skills/$fileName"
     val content = try {
         fetchUrl(url)
     } catch (e: Exception) {
