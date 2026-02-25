@@ -48,6 +48,12 @@ ssf-agent download compose-guidelines --agent=cursor,claude
 ### 4. Update Skills
 If a remote skill is updated (new version in `versions.json`), running the download command again will automatically update your local copy for all configured agents.
 
+### 5. Self-Update
+Keep `ssf-agent` itself up to date:
+```bash
+ssf-agent update
+```
+
 ## Supported AI Agents
 
 The tool automatically maps skills to the correct directory for these agents:
@@ -55,11 +61,18 @@ The tool automatically maps skills to the correct directory for these agents:
 | Agent | CLI Flag | Target Directory |
 | :--- | :--- | :--- |
 | **Claude Code** | `claude` | `.claude/skills/` |
+| **Claude Code (alt)** | `claude-code` | `.claude/skills/` |
 | **Cursor** | `cursor` | `.cursor/rules/` |
+| **OpenCode** | `opencode` | `.opencode/skills/` |
 | **Roo Code** | `roo` | `.roo/rules/` |
+| **Kilo** | `kilo` | `.kilocode/rules/` |
 | **Windsurf** | `windsurf` | `.windsurf/rules/` |
+| **Warp** | `warp` | `.warp/rules/` |
+| **Zencoder** | `zencoder` | `.zencoder/rules/` |
+| **Codex** | `codex` | `.codex/skills/` |
 | **Junie** | `junie` | `.junie/` |
 | **Gemini CLI** | `gemini` | `.gemini/skills/` |
+| **Antigravity** | `antigravity` | `.agent.antigravity/skills/` |
 | ... and many more (see CLI help) | | |
 
 ## License
