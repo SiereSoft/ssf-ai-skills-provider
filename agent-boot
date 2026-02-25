@@ -1,0 +1,11 @@
+#!/bin/bash
+# Check if kotlinc is installed
+if ! command -v kotlinc &> /dev/null
+then
+    echo "ERROR: kotlinc (Kotlin compiler) is not installed. Please install it to use agent-boot."
+    exit 1
+fi
+
+# Execute the Kotlin script
+# We use -script and pass all arguments
+kotlinc -script "$(dirname "$0")/agent-boot.main.kts" -- "$@"
