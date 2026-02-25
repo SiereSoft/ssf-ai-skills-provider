@@ -7,8 +7,8 @@ set -u
 AGENT_REGISTRY_KEYS=("claude" "claude-code" "cursor" "opencode" "roo" "kilo" "windsurf" "warp" "zencoder" "codex" "gemini" "antigravity" "junie")
 AGENT_REGISTRY_VALUES=(".claude/skills/" ".claude/skills/" ".cursor/rules/" ".opencode/skills/" ".roo/rules/" ".kilocode/rules/" ".windsurf/rules/" ".warp/rules/" ".zencoder/rules/" ".codex/skills/" ".gemini/skills/" ".agent.antigravity/skills/" ".junie/")
 
-LOCAL_TRACKER_FILE=".agent-boot-versions"
-CONFIG_FILE=".agent-boot-config"
+LOCAL_TRACKER_FILE=".ssf-agent-versions"
+CONFIG_FILE=".ssf-agent-config"
 REMOTE_BASE_URL="${AGENT_BOOT_REMOTE_URL:-https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/}"
 VERSIONS_FILE="versions.json"
 
@@ -31,8 +31,8 @@ print_usage() {
     done
     agents=${agents%, }
     printf "Usage:\n"
-    printf "  ./agent-boot select                        (Configure your default AI agents)\n"
-    printf "  ./agent-boot download <skill> [--agent=]   (Download/update a skill)\n\n"
+    printf "  ./ssf-agent select                        (Configure your default AI agents)\n"
+    printf "  ./ssf-agent download <skill> [--agent=]   (Download/update a skill)\n\n"
     printf "Supported Agents: %s\n" "$agents"
 }
 
@@ -145,7 +145,7 @@ version_gt() {
 
 check_dependencies() {
     if ! command -v curl &> /dev/null; then
-        printf "ERROR: curl is not installed. Please install it to use agent-boot.\n"
+        printf "ERROR: curl is not installed. Please install it to use ssf-agent.\n"
         exit 1
     fi
 }

@@ -1,8 +1,8 @@
-# Android AI Skill Bootstrap
+# SSF AI Skill Provider
 
 Eliminate AI hallucinations in Android development by enforcing strict architectural guardrails.
 
-The **Android AI Skill Bootstrap** is a lightweight CLI tool that fetches and installs "agent skills"—contextual markdown rules and architectural guidelines—directly into your local project. It ensures that your AI agents (Claude, Cursor, Windsurf, etc.) follow your project's specific standards without guessing.
+The **SSF AI Skill Provider** is a lightweight CLI tool that fetches and installs "agent skills"—contextual markdown rules and architectural guidelines—directly into your local project. It ensures that your AI agents (Claude, Cursor, Windsurf, etc.) follow your project's specific standards without guessing.
 
 ## Features
 
@@ -17,10 +17,10 @@ AI agents are powerful but prone to hallucinations when they don't have project-
 
 ## Installation
 
-Run this single command to install `agent-boot` globally on your machine:
+Run this single command to install `ssf-agent` globally on your machine:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/agent-boot -o agent-boot && chmod +x agent-boot && sudo mv agent-boot /usr/local/bin/agent-boot
+curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/ssf-agent -o ssf-agent && chmod +x ssf-agent && sudo mv ssf-agent /usr/local/bin/ssf-agent
 ```
 
 *Note: Requires `curl` to be installed on your system.*
@@ -30,19 +30,19 @@ curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/dev
 ### 1. Configure Default Agents
 Set up your preferred AI agents once to avoid repeated prompts:
 ```bash
-agent-boot select
+ssf-agent select
 ```
 
 ### 2. Simple Download
 Download a skill to your configured agents:
 ```bash
-agent-boot download mvi-architecture
+ssf-agent download mvi-architecture
 ```
 
 ### 3. Specify Agent(s) via Flag
 Bypass the configuration by specifying one or more agents (comma-separated):
 ```bash
-agent-boot download compose-guidelines --agent=cursor,claude
+ssf-agent download compose-guidelines --agent=cursor,claude
 ```
 
 ### 4. Update Skills

@@ -14,7 +14,7 @@ Skills are the core of this project. To add a new skill:
 
 ## Improving the CLI Tool
 
-To improve the `agent-boot.main.kts` script:
+To improve the `ssf-agent` script:
 
 1.  **Strict Requirements**: PRs must be pure Kotlin Script (`.main.kts`), have zero external dependencies other than standard libraries (and `kotlinx-serialization-json`), and pass POSIX terminal standards.
 2.  **No Side Effects**: The system must not modify project build files (`build.gradle`, etc.) or native source code. It only manages markdown skills.
