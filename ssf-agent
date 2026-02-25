@@ -18,8 +18,17 @@ C_RED='\033[31m'
 C_GREEN='\033[32m'
 C_CYAN='\033[36m'
 
-log_info() { printf "${C_CYAN}|${C_RESET} %s\n" "$1"; }
-log_success() { printf "${C_GREEN}|${C_RESET} %s\n" "$1"; }
+# In MCP mode, we strip ANSI colors from the output to prevent JSON corruption
+if [[ "${MCP_MODE:-0}" == "1" ]]; then
+    C_RESET=''
+    C_RED=''
+    C_GREEN=''
+    C_CYAN=''
+fi
+
+# All standard logs must go to stderr (>&2) to keep stdout pure for JSON-RPC
+log_info() { printf "${C_CYAN}|${C_RESET} %s\n" "$1" >&2; }
+log_success() { printf "${C_GREEN}|${C_RESET} %s\n" "$1" >&2; }
 log_error() { printf "${C_RED}|${C_RESET} %s\n" "$1" >&2; }
 
 # --- Core Functions ---
@@ -40,11 +49,12 @@ print_usage() {
         agents+="$agent, "
     done
     agents=${agents%, }
-    printf "Usage:\n"
-    printf "  ./ssf-agent select                        (Configure your default AI agents)\n"
-    printf "  ./ssf-agent download <skill> [--agent=]   (Download/update a skill)\n"
-    printf "  ./ssf-agent update                        (Self-update the ssf-agent script)\n\n"
-    printf "Supported Agents: %s\n" "$agents"
+    printf "Usage:\n" >&2
+    printf "  ./ssf-agent select                        (Configure your default AI agents)\n" >&2
+    printf "  ./ssf-agent download <skill> [--agent=]   (Download/update a skill)\n" >&2
+    printf "  ./ssf-agent update                        (Self-update the ssf-agent script)\n" >&2
+    printf "  ./ssf-agent mcp                           (Start JSON-RPC 2.0 stdio server)\n\n" >&2
+    printf "Supported Agents: %s\n" "$agents" >&2
 }
 
 # --- Interactive TUI for Multi-Selection ---
@@ -53,12 +63,10 @@ interactive_multiselect() {
     local cur=0
     local i
 
-    # Initialize all as unselected (0)
     for i in "${!AGENT_REGISTRY_KEYS[@]}"; do selected[$i]=0; done
 
     printf "\nSelect your target AI agents (Use ARROW KEYS to move, SPACE to toggle, ENTER to confirm):\n\n" >&2
 
-    # Hide cursor
     tput civis 2>/dev/null || true
 
     while true; do
@@ -157,14 +165,12 @@ handle_update() {
         exit 1
     fi
 
-    # Verify it's actually a bash script to prevent replacing with a 404 page
     if ! head -n 1 "$temp_file" | grep -q "#!/bin/bash"; then
         log_error "Downloaded file is invalid. Update aborted."
         rm -f "$temp_file"
         exit 1
     fi
 
-    # Safely determine where this script is currently running from
     local current_script_path
     if [[ "$0" == /* ]]; then
         current_script_path="$0"
@@ -200,9 +206,14 @@ handle_download() {
         target_agents_str=$(get_configured_agents)
 
         if [ -z "$target_agents_str" ]; then
-            log_info "No agents configured."
-            target_agents_str=$(interactive_multiselect)
-            save_config "$target_agents_str"
+            if [[ "${MCP_MODE:-0}" == "1" ]]; then
+                # Prevent stalling the MCP JSON-RPC pipe with an interactive prompt
+                target_agents_str="claude,cursor"
+            else
+                log_info "No agents configured."
+                target_agents_str=$(interactive_multiselect)
+                save_config "$target_agents_str"
+            fi
         fi
     fi
 
@@ -287,7 +298,64 @@ handle_download() {
     log_success "Skill '$skill_name' $action v$remote_version for $target_agents_str"
 }
 
-# Main Execution
+# --- MCP Stdio Server Integration ---
+handle_mcp() {
+    if ! command -v jq &> /dev/null; then
+        log_error "jq is required to run the MCP server. Please install it (e.g., brew install jq)."
+        exit 1
+    fi
+
+    # Set MCP mode to route all visual output away from stdout
+    export MCP_MODE=1
+
+    while IFS= read -r payload; do
+        if [ -z "$payload" ]; then continue; fi
+
+        local method
+        method=$(printf "%s" "$payload" | jq -r '.method // empty')
+        local id
+        id=$(printf "%s" "$payload" | jq -r '.id // empty')
+
+        case "$method" in
+            "initialize")
+                printf '{"jsonrpc": "2.0", "id": %s, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "ssf-agent-mcp", "version": "1.0.0"}}}\n' "$id"
+                ;;
+            "tools/list")
+                printf '{"jsonrpc": "2.0", "id": %s, "result": {"tools": [{"name": "download_skill", "description": "Download an Android AI skill/rule from the organizational registry directly into the local project structure.", "inputSchema": {"type": "object", "properties": {"skill_name": {"type": "string", "description": "The exact name of the skill to fetch (e.g., mvi-architecture)"}}, "required": ["skill_name"]}}]}}\n' "$id"
+                ;;
+            "tools/call")
+                local tool_name
+                tool_name=$(printf "%s" "$payload" | jq -r '.params.name')
+
+                if [[ "$tool_name" == "download_skill" ]]; then
+                    local skill_name
+                    skill_name=$(printf "%s" "$payload" | jq -r '.params.arguments.skill_name')
+
+                    local output
+                    # Execute download silently to stdout, capturing stderr into the output string
+                    output=$(handle_download "$skill_name" 2>&1 || echo "Execution failed")
+
+                    local safe_output
+                    safe_output=$(printf "%s" "$output" | jq -Rs .)
+
+                    printf '{"jsonrpc": "2.0", "id": %s, "result": {"content": [{"type": "text", "text": %s}]}}\n' "$id" "$safe_output"
+                else
+                    printf '{"jsonrpc": "2.0", "id": %s, "error": {"code": -32601, "message": "Method not found"}}\n' "$id"
+                fi
+                ;;
+            "notifications/initialized")
+                # Acknowledge quietly
+                ;;
+            *)
+                if [[ -n "$id" && "$id" != "null" ]]; then
+                    printf '{"jsonrpc": "2.0", "id": %s, "error": {"code": -32601, "message": "Method not found"}}\n' "$id"
+                fi
+                ;;
+        esac
+    done
+}
+
+# --- Main Execution ---
 check_dependencies
 
 if [ $# -eq 0 ]; then
@@ -308,8 +376,11 @@ case "$1" in
     update)
         handle_update
         ;;
+    mcp)
+        handle_mcp
+        ;;
     *)
-        printf "Unknown command: %s\n" "$1"
+        log_error "Unknown command: $1"
         print_usage
         exit 1
         ;;

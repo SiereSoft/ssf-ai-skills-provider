@@ -54,6 +54,30 @@ Keep `ssf-agent` itself up to date:
 ssf-agent update
 ```
 
+### 6. MCP Server Mode
+Because `ssf-agent` now natively speaks JSON-RPC over stdio, you can plug it directly into tools like Claude Desktop or Cursor as an MCP (Model Context Protocol) server.
+
+#### For Claude Desktop
+Add the script to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ssf-provider": {
+      "command": "/usr/local/bin/ssf-agent",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+#### For Cursor
+1. Go to **Cursor Settings** > **Features** > **MCP**.
+2. Click **+ Add New MCP Server**.
+3. Name: `ssf-provider`
+4. Type: `command`
+5. Command: `/usr/local/bin/ssf-agent mcp`
+
 ## Supported AI Agents
 
 The tool automatically maps skills to the correct directory for these agents:
