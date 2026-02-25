@@ -151,7 +151,7 @@ check_dependencies() {
 }
 
 handle_download() {
-    if [[ -z "$1" ]]; then
+    if [[ -z "${1:-}" ]]; then
         print_usage
         exit 1
     fi
@@ -168,7 +168,7 @@ handle_download() {
     # Resolve Target Agents (Flag -> Config -> Prompt)
     if [ -z "$target_agents_str" ]; then
         target_agents_str=$(get_configured_agents)
-        
+
         if [ -z "$target_agents_str" ]; then
             printf "No agents configured.\n"
             target_agents_str=$(interactive_multiselect)
@@ -181,21 +181,26 @@ handle_download() {
     IFS=',' read -r -a target_agents <<< "$target_agents_str"
 
     printf "Fetching remote registry...\n"
-    local remote_registry=$(curl -sSfL --connect-timeout 5 "$REMOTE_BASE_URL$VERSIONS_FILE" 2>/dev/null)
-    if [[ $? -ne 0 ]] || [[ -z "$remote_registry" ]]; then
-        printf "ERROR: Network unreachable. Cannot fetch skills.\n"
+    local remote_registry
+    remote_registry=$(curl -sSfL --connect-timeout 5 "$REMOTE_BASE_URL$VERSIONS_FILE" 2>/dev/null || true)
+
+    if [[ -z "$remote_registry" ]]; then
+        printf "ERROR: Network unreachable or file missing. Cannot fetch skills.\n"
         exit 1
     fi
 
     # Extract Skill Data using native tools (no 'jq' required)
-    local skill_block=$(printf "%s" "$remote_registry" | awk "/\"$skill_name\":/,/\}/")
+    local skill_block
+    skill_block=$(printf "%s" "$remote_registry" | awk "/\"$skill_name\":/,/\}/")
     if [ -z "$skill_block" ]; then
         printf "ERROR: Skill '%s' not found in repository.\n" "$skill_name"
         exit 1
     fi
 
-    local remote_version=$(printf "%s" "$skill_block" | grep -o '"version": *"[^"]*"' | cut -d'"' -f4)
-    local skill_file=$(printf "%s" "$skill_block" | grep -o '"file": *"[^"]*"' | cut -d'"' -f4)
+    local remote_version
+    remote_version=$(printf "%s" "$skill_block" | grep -o '"version": *"[^"]*"' | cut -d'"' -f4)
+    local skill_file
+    skill_file=$(printf "%s" "$skill_block" | grep -o '"file": *"[^"]*"' | cut -d'"' -f4)
 
     if [ -z "$remote_version" ] || [ -z "$skill_file" ]; then
          printf "ERROR: Skill '%s' not found in repository.\n" "$skill_name"
@@ -215,8 +220,9 @@ handle_download() {
     fi
 
     printf "Downloading skill %s...\n" "$skill_name"
-    local skill_content=$(curl -sSfL --connect-timeout 5 "${REMOTE_BASE_URL}skills/$skill_file" 2>/dev/null)
-    if [ $? -ne 0 ] || [ -z "$skill_content" ]; then
+    local skill_content
+    skill_content=$(curl -sSfL --connect-timeout 5 "${REMOTE_BASE_URL}skills/$skill_file" 2>/dev/null || true)
+    if [ -z "$skill_content" ]; then
         printf "ERROR: Failed to download skill file '%s'.\n" "$skill_file"
         exit 1
     fi
@@ -225,9 +231,9 @@ handle_download() {
     local agent target_dir
     for agent in "${target_agents[@]}"; do
         # Trim whitespace
-        agent=$(echo "$agent" | xargs) 
+        agent=$(echo "$agent" | xargs)
         target_dir=$(get_agent_path "$(echo "$agent" | tr '[:upper:]' '[:lower:]')")
-        
+
         if [ -z "$target_dir" ]; then
             printf "WARNING: Unsupported agent '%s'. Skipping.\n" "$agent"
             continue
@@ -264,12 +270,14 @@ if [ $# -eq 0 ]; then
     exit 0
 fi
 
-    local SELECTED_AGENTS
-    case "$1" in
-        select)
-            SELECTED_AGENTS=$(interactive_multiselect)
-            save_config "$SELECTED_AGENTS"
-            ;;
+# Removed the 'local' keyword here since this is global scope
+SELECTED_AGENTS=""
+
+case "$1" in
+    select)
+        SELECTED_AGENTS=$(interactive_multiselect)
+        save_config "$SELECTED_AGENTS"
+        ;;
     download)
         handle_download "${@:2}"
         ;;
