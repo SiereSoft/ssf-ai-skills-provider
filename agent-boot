@@ -1,11 +1,165 @@
 #!/bin/bash
-# Check if kotlinc is installed
-if ! command -v kotlinc &> /dev/null
-then
-    echo "ERROR: kotlinc (Kotlin compiler) is not installed. Please install it to use agent-boot."
-    exit 1
-fi
 
-# Execute the Kotlin script
-# We use -script and pass all arguments
-kotlinc -script "$(dirname "$0")/agent-boot.main.kts" -- "$@"
+# Configuration
+AGENT_REGISTRY_KEYS=("claude" "claude-code" "cursor" "opencode" "roo" "kilo" "windsurf" "warp" "zencoder" "codex" "gemini" "antigravity" "junie")
+AGENT_REGISTRY_VALUES=(".claude/skills/" ".claude/skills/" ".cursor/rules/" ".opencode/skills/" ".roo/rules/" ".kilocode/rules/" ".windsurf/rules/" ".warp/rules/" ".zencoder/rules/" ".codex/skills/" ".gemini/skills/" ".agent/skills/" ".junie/")
+
+LOCAL_TRACKING_FILE=".agent-boot-versions.json"
+REMOTE_BASE_URL="${AGENT_BOOT_REMOTE_URL:-https://raw.githubusercontent.com/Siere/ssf-ai-skills-provider/main/}"
+
+# Functions
+get_agent_path() {
+    local agent=$1
+    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
+        if [[ "${AGENT_REGISTRY_KEYS[$i]}" == "$agent" ]]; then
+            echo "${AGENT_REGISTRY_VALUES[$i]}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+print_usage() {
+    local agents=""
+    for agent in "${AGENT_REGISTRY_KEYS[@]}"; do
+        agents+="$agent, "
+    done
+    agents=${agents%, }
+    echo "Usage: ./agent-boot download <skill-name> [--agent=<agent>]"
+    echo "Supported agents: $agents"
+}
+
+is_newer() {
+    local remote=$1
+    local local_v=$2
+    if [[ "$remote" == "$local_v" ]]; then
+        return 1
+    fi
+    local remote_parts=(${remote//./ })
+    local local_parts=(${local_v//./ })
+    for i in {0..2}; do
+        local r=${remote_parts[$i]:-0}
+        local l=${local_parts[$i]:-0}
+        if (( r > l )); then
+            return 0
+        elif (( r < l )); then
+            return 1
+        fi
+    done
+    return 1
+}
+
+prompt_for_agent() {
+    echo "Please select your target AI agent:"
+    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
+        echo "$((i+1))) ${AGENT_REGISTRY_KEYS[$i]}"
+    done
+    read -p "Selection (1-${#AGENT_REGISTRY_KEYS[@]}): " selection
+    if [[ ! "$selection" =~ ^[0-9]+$ ]] || (( selection < 1 )) || (( selection > ${#AGENT_REGISTRY_KEYS[@]} )); then
+        echo "Invalid selection."
+        exit 1
+    fi
+    echo "${AGENT_REGISTRY_KEYS[$((selection-1))]}"
+}
+
+check_dependencies() {
+    if ! command -v curl &> /dev/null; then
+        echo "ERROR: curl is not installed. Please install it to use agent-boot."
+        exit 1
+    fi
+    if ! command -v jq &> /dev/null; then
+        echo "ERROR: jq is not installed. Please install it to use agent-boot for JSON parsing."
+        exit 1
+    fi
+}
+
+handle_download() {
+    if [[ -z "$1" ]]; then
+        print_usage
+        exit 1
+    fi
+    local skill_name=$1
+    local agent_name=""
+    
+    # Parse --agent= argument
+    for arg in "$@"; do
+        if [[ "$arg" == --agent=* ]]; then
+            agent_name="${arg#--agent=}"
+        fi
+    done
+
+    if [[ -z "$agent_name" ]]; then
+        agent_name=$(prompt_for_agent)
+    fi
+
+    local target_dir=$(get_agent_path "$(echo "$agent_name" | tr '[:upper:]' '[:lower:]')")
+    if [[ -z "$target_dir" ]]; then
+        echo "ERROR: Unsupported agent '$agent_name'"
+        exit 1
+    fi
+
+    echo "Fetching remote registry..."
+    local remote_registry=$(curl -sL "${REMOTE_BASE_URL}versions.json")
+    if [[ $? -ne 0 ]] || [[ -z "$remote_registry" ]]; then
+        echo "ERROR: Network unreachable. Cannot fetch skills."
+        exit 1
+    fi
+
+    local skill_info=$(echo "$remote_registry" | jq -r ".skills[\"$skill_name\"]")
+    if [[ "$skill_info" == "null" ]]; then
+        echo "ERROR: Skill '$skill_name' not found in repository."
+        exit 1
+    fi
+
+    local remote_version=$(echo "$skill_info" | jq -r ".version")
+    local skill_file=$(echo "$skill_info" | jq -r ".file")
+
+    local current_local_version="0.0.0"
+    if [[ -f "$LOCAL_TRACKING_FILE" ]]; then
+        current_local_version=$(jq -r ".[\"$skill_name\"] // \"0.0.0\"" "$LOCAL_TRACKING_FILE")
+    fi
+
+    if [[ "$current_local_version" != "0.0.0" ]]; then
+        if ! is_newer "$remote_version" "$current_local_version"; then
+            echo "Skill $skill_name is already up to date."
+            return
+        fi
+    fi
+
+    echo "Downloading skill $skill_name..."
+    mkdir -p "$target_dir"
+    curl -sL "${REMOTE_BASE_URL}skills/$skill_file" -o "$target_dir/$skill_file"
+    if [[ $? -ne 0 ]]; then
+        echo "ERROR: Failed to download skill file '$skill_file'."
+        exit 1
+    fi
+
+    # Update local version file
+    if [[ ! -f "$LOCAL_TRACKING_FILE" ]]; then
+        echo "{}" > "$LOCAL_TRACKING_FILE"
+    fi
+    local updated_json=$(jq ".\"$skill_name\" = \"$remote_version\"" "$LOCAL_TRACKING_FILE")
+    echo "$updated_json" > "$LOCAL_TRACKING_FILE"
+
+    if [[ "$current_local_version" == "0.0.0" ]]; then
+        echo "Successfully installed $skill_name v$remote_version for $agent_name."
+    else
+        echo "Skill updated to v$remote_version"
+    fi
+}
+
+# Main
+check_dependencies
+
+case "$1" in
+    download)
+        handle_download "${@:2}"
+        ;;
+    *)
+        if [[ -n "$1" ]]; then
+            echo "Unknown command: $1"
+        fi
+        print_usage
+        exit 1
+        ;;
+esac
