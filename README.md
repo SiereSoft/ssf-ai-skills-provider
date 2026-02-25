@@ -20,27 +20,33 @@ AI agents are powerful but prone to hallucinations when they don't have project-
 Run this single command to install `agent-boot` globally on your machine:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Siere/ssf-ai-skills-provider/main/agent-boot -o agent-boot && chmod +x agent-boot && sudo mv agent-boot /usr/local/bin/agent-boot
+curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/agent-boot -o agent-boot && chmod +x agent-boot && sudo mv agent-boot /usr/local/bin/agent-boot
 ```
 
-*Note: Requires `curl` and `jq` to be installed on your system.*
+*Note: Requires `curl` to be installed on your system.*
 
 ## Usage
 
-### 1. Simple Download
-Download a skill and let the tool prompt you for the target agent:
+### 1. Configure Default Agents
+Set up your preferred AI agents once to avoid repeated prompts:
+```bash
+agent-boot select
+```
+
+### 2. Simple Download
+Download a skill to your configured agents:
 ```bash
 agent-boot download mvi-architecture
 ```
 
-### 2. Specify Agent via Flag
-Bypass the prompt by specifying your agent:
+### 3. Specify Agent(s) via Flag
+Bypass the configuration by specifying one or more agents (comma-separated):
 ```bash
-agent-boot download compose-guidelines --agent=cursor
+agent-boot download compose-guidelines --agent=cursor,claude
 ```
 
-### 3. Update Skills
-If a remote skill is updated (new version in `versions.json`), running the download command again will automatically update your local copy.
+### 4. Update Skills
+If a remote skill is updated (new version in `versions.json`), running the download command again will automatically update your local copy for all configured agents.
 
 ## Supported AI Agents
 

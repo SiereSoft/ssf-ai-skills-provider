@@ -1,18 +1,23 @@
 #!/bin/bash
 
-# Configuration
+set -e
+set -u
+
+# --- Configuration ---
 AGENT_REGISTRY_KEYS=("claude" "claude-code" "cursor" "opencode" "roo" "kilo" "windsurf" "warp" "zencoder" "codex" "gemini" "antigravity" "junie")
-AGENT_REGISTRY_VALUES=(".claude/skills/" ".claude/skills/" ".cursor/rules/" ".opencode/skills/" ".roo/rules/" ".kilocode/rules/" ".windsurf/rules/" ".warp/rules/" ".zencoder/rules/" ".codex/skills/" ".gemini/skills/" ".agent/skills/" ".junie/")
+AGENT_REGISTRY_VALUES=(".claude/skills/" ".claude/skills/" ".cursor/rules/" ".opencode/skills/" ".roo/rules/" ".kilocode/rules/" ".windsurf/rules/" ".warp/rules/" ".zencoder/rules/" ".codex/skills/" ".gemini/skills/" ".agent.antigravity/skills/" ".junie/")
 
-LOCAL_TRACKING_FILE=".agent-boot-versions.json"
-REMOTE_BASE_URL="${AGENT_BOOT_REMOTE_URL:-https://raw.githubusercontent.com/Siere/ssf-ai-skills-provider/main/}"
+LOCAL_TRACKER_FILE=".agent-boot-versions"
+CONFIG_FILE=".agent-boot-config"
+REMOTE_BASE_URL="${AGENT_BOOT_REMOTE_URL:-https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/}"
+VERSIONS_FILE="versions.json"
 
-# Functions
+# --- Core Functions ---
 get_agent_path() {
     local agent=$1
     for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
         if [[ "${AGENT_REGISTRY_KEYS[$i]}" == "$agent" ]]; then
-            echo "${AGENT_REGISTRY_VALUES[$i]}"
+            printf "%s" "${AGENT_REGISTRY_VALUES[$i]}"
             return 0
         fi
     done
@@ -25,50 +30,122 @@ print_usage() {
         agents+="$agent, "
     done
     agents=${agents%, }
-    echo "Usage: ./agent-boot download <skill-name> [--agent=<agent>]"
-    echo "Supported agents: $agents"
+    printf "Usage:\n"
+    printf "  ./agent-boot select                        (Configure your default AI agents)\n"
+    printf "  ./agent-boot download <skill> [--agent=]   (Download/update a skill)\n\n"
+    printf "Supported Agents: %s\n" "$agents"
 }
 
-is_newer() {
-    local remote=$1
-    local local_v=$2
-    if [[ "$remote" == "$local_v" ]]; then
-        return 1
-    fi
-    local remote_parts=(${remote//./ })
-    local local_parts=(${local_v//./ })
-    for i in {0..2}; do
-        local r=${remote_parts[$i]:-0}
-        local l=${local_parts[$i]:-0}
-        if (( r > l )); then
-            return 0
-        elif (( r < l )); then
-            return 1
+# --- Interactive TUI for Multi-Selection ---
+interactive_multiselect() {
+    local selected=()
+    local cur=0
+    local i
+
+    # Initialize all as unselected (0)
+    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do selected[$i]=0; done
+
+    printf "\nSelect your target AI agents (Use ARROW KEYS to move, SPACE to toggle, ENTER to confirm):\n\n" >&2
+
+    # Hide cursor
+    tput civis 2>/dev/null || true
+
+    while true; do
+        # Print options
+        for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
+            local prefix="  "
+            local box="[ ]"
+            
+            [ $i -eq $cur ] && prefix="> "
+            [ ${selected[$i]} -eq 1 ] && box="[x]"
+            
+            # \033[K clears the line to the right to prevent ghost characters
+            printf "\033[K%s%s %s\n" "$prefix" "$box" "${AGENT_REGISTRY_KEYS[$i]}" >&2
+        done
+
+        # Read single character input silently
+        read -rsn1 key
+
+        # Handle Escape sequences (Arrow keys)
+        if [[ $key == $'\x1b' ]]; then
+            local seq
+            read -rsn2 -t 1 seq || true
+            if [[ $seq == "[A" ]]; then ((cur--)); fi # Up arrow
+            if [[ $seq == "[B" ]]; then ((cur++)); fi # Down arrow
+        # Handle Spacebar (Toggle)
+        elif [[ $key == " " ]]; then
+            selected[$cur]=$((1 - selected[$cur]))
+        # Handle Enter (Confirm)
+        elif [[ $key == "" ]]; then
+            break
         fi
+
+        # Keep cursor within bounds
+        [ $cur -lt 0 ] && cur=0
+        [ $cur -ge ${#AGENT_REGISTRY_KEYS[@]} ] && cur=$((${#AGENT_REGISTRY_KEYS[@]}-1))
+
+        # Move terminal cursor back up to redraw the menu
+        printf "\033[%sA" "${#AGENT_REGISTRY_KEYS[@]}" >&2
+    done
+
+    # Restore cursor
+    tput cnorm 2>/dev/null || true
+
+    # Extract chosen agents
+    local chosen=()
+    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
+        if [ ${selected[$i]} -eq 1 ]; then
+            chosen+=("${AGENT_REGISTRY_KEYS[$i]}")
+        fi
+    done
+
+    # Fallback if none selected
+    if [ ${#chosen[@]} -eq 0 ]; then
+        printf "ERROR: No agents selected. Aborting.\n" >&2
+        exit 1
+    fi
+
+    # Join with commas and return
+    local IFS=','
+    local result="${chosen[*]}"
+    printf "%s" "$result"
+}
+
+save_config() {
+    local chosen_agents="$1"
+    echo "DEFAULT_AGENTS=\"$chosen_agents\"" > "$CONFIG_FILE"
+    printf "SUCCESS: Saved agents to %s (%s)\n" "$CONFIG_FILE" "$chosen_agents"
+}
+
+get_configured_agents() {
+    if [ -f "$CONFIG_FILE" ]; then
+        # Safely extract the default agents string
+        grep "^DEFAULT_AGENTS=" "$CONFIG_FILE" | cut -d'"' -f2 || true
+    else
+        printf ""
+    fi
+}
+
+# Cross-platform Bash version comparison (Returns 0 if $1 > $2)
+version_gt() {
+    [ "$1" = "$2" ] && return 1
+    local IFS=.
+    local i ver1 ver2
+    ver1=($1)
+    ver2=($2)
+    # Fill empty fields in ver1 with zeros
+    for ((i=${#ver1[@]}; i<${#ver2[@]}; i++)); do ver1[i]=0; done
+    for ((i=0; i<${#ver1[@]}; i++)); do
+        if [[ -z ${ver2[i]:-} ]]; then ver2[i]=0; fi
+        if ((10#${ver1[i]} > 10#${ver2[i]})); then return 0; fi
+        if ((10#${ver1[i]} < 10#${ver2[i]})); then return 1; fi
     done
     return 1
 }
 
-prompt_for_agent() {
-    echo "Please select your target AI agent:"
-    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
-        echo "$((i+1))) ${AGENT_REGISTRY_KEYS[$i]}"
-    done
-    read -p "Selection (1-${#AGENT_REGISTRY_KEYS[@]}): " selection
-    if [[ ! "$selection" =~ ^[0-9]+$ ]] || (( selection < 1 )) || (( selection > ${#AGENT_REGISTRY_KEYS[@]} )); then
-        echo "Invalid selection."
-        exit 1
-    fi
-    echo "${AGENT_REGISTRY_KEYS[$((selection-1))]}"
-}
-
 check_dependencies() {
     if ! command -v curl &> /dev/null; then
-        echo "ERROR: curl is not installed. Please install it to use agent-boot."
-        exit 1
-    fi
-    if ! command -v jq &> /dev/null; then
-        echo "ERROR: jq is not installed. Please install it to use agent-boot for JSON parsing."
+        printf "ERROR: curl is not installed. Please install it to use agent-boot.\n"
         exit 1
     fi
 }
@@ -79,86 +156,125 @@ handle_download() {
         exit 1
     fi
     local skill_name=$1
-    local agent_name=""
-    
-    # Parse --agent= argument
+    local target_agents_str=""
+
+    # Parse arguments
     for arg in "$@"; do
         if [[ "$arg" == --agent=* ]]; then
-            agent_name="${arg#--agent=}"
+            target_agents_str="${arg#--agent=}"
         fi
     done
 
-    if [[ -z "$agent_name" ]]; then
-        agent_name=$(prompt_for_agent)
+    # Resolve Target Agents (Flag -> Config -> Prompt)
+    if [ -z "$target_agents_str" ]; then
+        target_agents_str=$(get_configured_agents)
+        
+        if [ -z "$target_agents_str" ]; then
+            printf "No agents configured.\n"
+            target_agents_str=$(interactive_multiselect)
+            save_config "$target_agents_str"
+        fi
     fi
 
-    local target_dir=$(get_agent_path "$(echo "$agent_name" | tr '[:upper:]' '[:lower:]')")
-    if [[ -z "$target_dir" ]]; then
-        echo "ERROR: Unsupported agent '$agent_name'"
-        exit 1
-    fi
+    # Convert comma-separated string to array
+    local -a target_agents
+    IFS=',' read -r -a target_agents <<< "$target_agents_str"
 
-    echo "Fetching remote registry..."
-    local remote_registry=$(curl -sL "${REMOTE_BASE_URL}versions.json")
+    printf "Fetching remote registry...\n"
+    local remote_registry=$(curl -sSfL --connect-timeout 5 "$REMOTE_BASE_URL$VERSIONS_FILE" 2>/dev/null)
     if [[ $? -ne 0 ]] || [[ -z "$remote_registry" ]]; then
-        echo "ERROR: Network unreachable. Cannot fetch skills."
+        printf "ERROR: Network unreachable. Cannot fetch skills.\n"
         exit 1
     fi
 
-    local skill_info=$(echo "$remote_registry" | jq -r ".skills[\"$skill_name\"]")
-    if [[ "$skill_info" == "null" ]]; then
-        echo "ERROR: Skill '$skill_name' not found in repository."
+    # Extract Skill Data using native tools (no 'jq' required)
+    local skill_block=$(printf "%s" "$remote_registry" | awk "/\"$skill_name\":/,/\}/")
+    if [ -z "$skill_block" ]; then
+        printf "ERROR: Skill '%s' not found in repository.\n" "$skill_name"
         exit 1
     fi
 
-    local remote_version=$(echo "$skill_info" | jq -r ".version")
-    local skill_file=$(echo "$skill_info" | jq -r ".file")
+    local remote_version=$(printf "%s" "$skill_block" | grep -o '"version": *"[^"]*"' | cut -d'"' -f4)
+    local skill_file=$(printf "%s" "$skill_block" | grep -o '"file": *"[^"]*"' | cut -d'"' -f4)
 
-    local current_local_version="0.0.0"
-    if [[ -f "$LOCAL_TRACKING_FILE" ]]; then
-        current_local_version=$(jq -r ".[\"$skill_name\"] // \"0.0.0\"" "$LOCAL_TRACKING_FILE")
+    if [ -z "$remote_version" ] || [ -z "$skill_file" ]; then
+         printf "ERROR: Skill '%s' not found in repository.\n" "$skill_name"
+         exit 1
     fi
 
-    if [[ "$current_local_version" != "0.0.0" ]]; then
-        if ! is_newer "$remote_version" "$current_local_version"; then
-            echo "Skill $skill_name is already up to date."
+    local current_local_version=""
+    if [ -f "$LOCAL_TRACKER_FILE" ]; then
+        current_local_version=$(grep "^$skill_name=" "$LOCAL_TRACKER_FILE" | cut -d'=' -f2 || true)
+    fi
+
+    if [ -n "$current_local_version" ]; then
+        if ! version_gt "$remote_version" "$current_local_version"; then
+            printf "Skill '%s' is already up to date (v%s).\n" "$skill_name" "$current_local_version"
             return
         fi
     fi
 
-    echo "Downloading skill $skill_name..."
-    mkdir -p "$target_dir"
-    curl -sL "${REMOTE_BASE_URL}skills/$skill_file" -o "$target_dir/$skill_file"
-    if [[ $? -ne 0 ]]; then
-        echo "ERROR: Failed to download skill file '$skill_file'."
+    printf "Downloading skill %s...\n" "$skill_name"
+    local skill_content=$(curl -sSfL --connect-timeout 5 "${REMOTE_BASE_URL}skills/$skill_file" 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$skill_content" ]; then
+        printf "ERROR: Failed to download skill file '%s'.\n" "$skill_file"
         exit 1
     fi
 
-    # Update local version file
-    if [[ ! -f "$LOCAL_TRACKING_FILE" ]]; then
-        echo "{}" > "$LOCAL_TRACKING_FILE"
-    fi
-    local updated_json=$(jq ".\"$skill_name\" = \"$remote_version\"" "$LOCAL_TRACKING_FILE")
-    echo "$updated_json" > "$LOCAL_TRACKING_FILE"
+    # Distribution
+    local agent target_dir
+    for agent in "${target_agents[@]}"; do
+        # Trim whitespace
+        agent=$(echo "$agent" | xargs) 
+        target_dir=$(get_agent_path "$(echo "$agent" | tr '[:upper:]' '[:lower:]')")
+        
+        if [ -z "$target_dir" ]; then
+            printf "WARNING: Unsupported agent '%s'. Skipping.\n" "$agent"
+            continue
+        fi
 
-    if [[ "$current_local_version" == "0.0.0" ]]; then
-        echo "Successfully installed $skill_name v$remote_version for $agent_name."
-    else
-        echo "Skill updated to v$remote_version"
-    fi
+        if ! mkdir -p "$target_dir" 2>/dev/null; then
+            printf "ERROR: Insufficient directory permissions for %s.\n" "$target_dir"
+            exit 1
+        fi
+
+        if ! printf "%s\n" "$skill_content" > "$target_dir/$skill_file" 2>/dev/null; then
+            printf "ERROR: Insufficient directory permissions for %s.\n" "$target_dir"
+            exit 1
+        fi
+        printf " -> Placed in %s\n" "$target_dir"
+    done
+
+    # Update Tracker (Creates or updates key=value flat file)
+    touch "$LOCAL_TRACKER_FILE" 2>/dev/null || { printf "ERROR: Insufficient directory permissions.\n"; exit 1; }
+    grep -v "^$skill_name=" "$LOCAL_TRACKER_FILE" > "${LOCAL_TRACKER_FILE}.tmp" 2>/dev/null || true
+    printf "%s=%s\n" "$skill_name" "$remote_version" >> "${LOCAL_TRACKER_FILE}.tmp"
+    mv "${LOCAL_TRACKER_FILE}.tmp" "$LOCAL_TRACKER_FILE"
+
+    local action="installed"
+    [ -n "$current_local_version" ] && action="updated to"
+    printf "\nSUCCESS: Skill '%s' %s v%s for %s\n" "$skill_name" "$action" "$remote_version" "$target_agents_str"
 }
 
-# Main
+# Main Execution
 check_dependencies
 
-case "$1" in
+if [ $# -eq 0 ]; then
+    print_usage
+    exit 0
+fi
+
+    local SELECTED_AGENTS
+    case "$1" in
+        select)
+            SELECTED_AGENTS=$(interactive_multiselect)
+            save_config "$SELECTED_AGENTS"
+            ;;
     download)
         handle_download "${@:2}"
         ;;
     *)
-        if [[ -n "$1" ]]; then
-            echo "Unknown command: $1"
-        fi
+        printf "Unknown command: %s\n" "$1"
         print_usage
         exit 1
         ;;
