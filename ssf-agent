@@ -55,28 +55,28 @@ interactive_multiselect() {
         for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
             local prefix="  "
             local box="[ ]"
-            
+
             [ $i -eq $cur ] && prefix="> "
             [ ${selected[$i]} -eq 1 ] && box="[x]"
-            
+
             # \033[K clears the line to the right to prevent ghost characters
             printf "\033[K%s%s %s\n" "$prefix" "$box" "${AGENT_REGISTRY_KEYS[$i]}" >&2
         done
 
-        # Read single character input silently
-        read -rsn1 key
+        # Read single character input silently (IFS= prevents space stripping)
+        IFS= read -rsn1 key
 
         # Handle Escape sequences (Arrow keys)
-        if [[ $key == $'\x1b' ]]; then
+        if [[ "$key" == $'\x1b' ]]; then
             local seq
-            read -rsn2 -t 1 seq || true
-            if [[ $seq == "[A" ]]; then ((cur--)); fi # Up arrow
-            if [[ $seq == "[B" ]]; then ((cur++)); fi # Down arrow
+            IFS= read -rsn2 -t 1 seq || true
+            if [[ "$seq" == "[A" ]]; then ((cur--)); fi # Up arrow
+            if [[ "$seq" == "[B" ]]; then ((cur++)); fi # Down arrow
         # Handle Spacebar (Toggle)
-        elif [[ $key == " " ]]; then
+        elif [[ "$key" == " " ]]; then
             selected[$cur]=$((1 - selected[$cur]))
         # Handle Enter (Confirm)
-        elif [[ $key == "" ]]; then
+        elif [[ "$key" == "" ]]; then
             break
         fi
 
@@ -270,7 +270,6 @@ if [ $# -eq 0 ]; then
     exit 0
 fi
 
-# Removed the 'local' keyword here since this is global scope
 SELECTED_AGENTS=""
 
 case "$1" in
