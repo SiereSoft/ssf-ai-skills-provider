@@ -51,7 +51,7 @@ print_usage() {
     agents=${agents%, }
     printf "Usage:\n" >&2
     printf "  ./ssf-agent select                        (Configure your default AI agents)\n" >&2
-    printf "  ./ssf-agent download <skill> [--agent=] [--minified|-m] (Download/update a skill)\n" >&2
+    printf "  ./ssf-agent [download] <skill> [--min]    (Download/update a skill)\n" >&2
     printf "  ./ssf-agent update                        (Self-update the ssf-agent script)\n" >&2
     printf "  ./ssf-agent mcp                           (Start JSON-RPC 2.0 stdio server)\n\n" >&2
     printf "Supported Agents: %s\n" "$agents" >&2
@@ -63,11 +63,32 @@ interactive_multiselect() {
     local cur=0
     local i
 
-    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do selected[$i]=0; done
+    # Read previously configured agents and strip all hidden line endings
+    local configured_agents
+    configured_agents=$(get_configured_agents)
+    local -a conf_arr=()
+    if [ -n "$configured_agents" ]; then
+        IFS=',' read -r -a conf_arr <<< "$configured_agents"
+    fi
+
+    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
+        selected[$i]=0
+        if [ ${#conf_arr[@]} -gt 0 ]; then
+            for ca in "${conf_arr[@]}"; do
+                # Clean any rogue spaces or newlines that snuck into the array
+                local clean_ca
+                clean_ca=$(echo "$ca" | tr -d '\r\n ')
+                if [[ "${AGENT_REGISTRY_KEYS[$i]}" == "$clean_ca" ]]; then
+                    selected[$i]=1
+                    break
+                fi
+            done
+        fi
+    done
 
     printf "\nSelect your target AI agents (Use ARROW KEYS to move, SPACE to toggle, ENTER to confirm):\n\n" >&2
 
-    tput civis 2>/dev/null || true
+    tput civis >&2 2>/dev/null || true
 
     while true; do
         for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
@@ -99,7 +120,7 @@ interactive_multiselect() {
         printf "\033[%sA" "${#AGENT_REGISTRY_KEYS[@]}" >&2
     done
 
-    tput cnorm 2>/dev/null || true
+    tput cnorm >&2 2>/dev/null || true
 
     local chosen=()
     for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
@@ -126,7 +147,8 @@ save_config() {
 
 get_configured_agents() {
     if [ -f "$CONFIG_FILE" ]; then
-        grep "^DEFAULT_AGENTS=" "$CONFIG_FILE" | cut -d'"' -f2 || true
+        # Aggressively strip \r and \n to prevent matching failures
+        grep "^DEFAULT_AGENTS=" "$CONFIG_FILE" | cut -d'"' -f2 | tr -d '\r\n' || true
     else
         printf ""
     fi
@@ -200,7 +222,7 @@ handle_download() {
     for arg in "$@"; do
         if [[ "$arg" == --agent=* ]]; then
             target_agents_str="${arg#--agent=}"
-        elif [[ "$arg" == "--minified" || "$arg" == "-m" ]]; then
+        elif [[ "$arg" == "--minified" || "$arg" == "-m" || "$arg" == "--min" ]]; then
             use_minified=1
         fi
     done
@@ -210,7 +232,6 @@ handle_download() {
 
         if [ -z "$target_agents_str" ]; then
             if [[ "${MCP_MODE:-0}" == "1" ]]; then
-                # Prevent stalling the MCP JSON-RPC pipe with an interactive prompt
                 target_agents_str="claude,cursor"
             else
                 log_info "No agents configured."
@@ -239,32 +260,52 @@ handle_download() {
         exit 1
     fi
 
+    # Strip hidden characters from remote parsing
     local remote_version
-    remote_version=$(printf "%s" "$skill_block" | grep -o '"version": *"[^"]*"' | cut -d'"' -f4)
+    remote_version=$(printf "%s" "$skill_block" | grep -o '"version": *"[^"]*"' | cut -d'"' -f4 | tr -d '\r\n')
     local skill_file
-    skill_file=$(printf "%s" "$skill_block" | grep -o '"file": *"[^"]*"' | cut -d'"' -f4)
+    skill_file=$(printf "%s" "$skill_block" | grep -o '"file": *"[^"]*"' | cut -d'"' -f4 | tr -d '\r\n')
 
     if [ -z "$remote_version" ] || [ -z "$skill_file" ]; then
          log_error "Skill '$skill_name' not found in repository."
          exit 1
     fi
 
+    # Strip hidden characters from local tracking file
     local current_local_version=""
     if [ -f "$LOCAL_TRACKER_FILE" ]; then
-        current_local_version=$(grep "^$skill_name=" "$LOCAL_TRACKER_FILE" | cut -d'=' -f2 || true)
+        current_local_version=$(grep "^$skill_name=" "$LOCAL_TRACKER_FILE" | cut -d'=' -f2 | tr -d '\r\n' || true)
     fi
 
+    local force_download=0
     if [ -n "$current_local_version" ]; then
-        if ! version_gt "$remote_version" "$current_local_version"; then
-            log_info "Skill '$skill_name' is already up to date (v$current_local_version)."
-            return
+        if version_gt "$remote_version" "$current_local_version"; then
+            force_download=1
+        else
+            for agent in "${target_agents[@]}"; do
+                local check_agent check_dir
+                # Clean before checking path
+                check_agent=$(echo "$agent" | tr -d '\r\n ')
+                check_dir=$(get_agent_path "$(echo "$check_agent" | tr '[:upper:]' '[:lower:]')")
+                if [ -n "$check_dir" ] && [ ! -f "$check_dir/$skill_file" ]; then
+                    force_download=1
+                    break
+                fi
+            done
         fi
+    else
+        force_download=1
+    fi
+
+    if [ "$force_download" -eq 0 ]; then
+        log_info "Skill '$skill_name' is already up to date (v$current_local_version)."
+        return
     fi
 
     local remote_skill_file="$skill_file"
     if [ "$use_minified" -eq 1 ]; then
         remote_skill_file="${skill_file%.*}.min.md"
-        log_info "Using optimized token footprint (--minified)..."
+        log_info "Using optimized token footprint (--min)..."
     fi
 
     log_info "Downloading skill $skill_name (v$remote_version)..."
@@ -273,14 +314,15 @@ handle_download() {
     if [ -z "$skill_content" ]; then
         log_error "Failed to download skill file '$remote_skill_file'."
         if [ "$use_minified" -eq 1 ]; then
-            log_error "Hint: The minified version might not exist yet. Try without the --minified flag."
+            log_error "Hint: The minified version might not exist yet. Try without the --min flag."
         fi
         exit 1
     fi
 
     local agent target_dir
     for agent in "${target_agents[@]}"; do
-        agent=$(echo "$agent" | xargs)
+        # Absolute sanitization before file system operations
+        agent=$(echo "$agent" | tr -d '\r\n ')
         target_dir=$(get_agent_path "$(echo "$agent" | tr '[:upper:]' '[:lower:]')")
 
         if [ -z "$target_dir" ]; then
@@ -293,7 +335,6 @@ handle_download() {
             exit 1
         fi
 
-        # We save it as standard $skill_file (.md), not $remote_skill_file (.min.md)
         if ! printf "%s\n" "$skill_content" > "$target_dir/$skill_file" 2>/dev/null; then
             log_error "Insufficient directory permissions for $target_dir."
             exit 1
@@ -318,7 +359,6 @@ handle_mcp() {
         exit 1
     fi
 
-    # Set MCP mode to route all visual output away from stdout
     export MCP_MODE=1
 
     while IFS= read -r payload; do
@@ -334,7 +374,7 @@ handle_mcp() {
                 printf '{"jsonrpc": "2.0", "id": %s, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "ssf-agent-mcp", "version": "1.0.0"}}}\n' "$id"
                 ;;
             "tools/list")
-                printf '{"jsonrpc": "2.0", "id": %s, "result": {"tools": [{"name": "download_skill", "description": "Download an Android AI skill/rule from the organizational registry directly into the local project structure.", "inputSchema": {"type": "object", "properties": {"skill_name": {"type": "string", "description": "The exact name of the skill to fetch (e.g., mvi-architecture)"}}, "required": ["skill_name"]}}]}}\n' "$id"
+                printf '{"jsonrpc": "2.0", "id": %s, "result": {"tools": [{"name": "download_skill", "description": "Download an AI skill/rule from the organizational registry directly into the local project structure.", "inputSchema": {"type": "object", "properties": {"skill_name": {"type": "string", "description": "The exact name of the skill to fetch"}}, "required": ["skill_name"]}}]}}\n' "$id"
                 ;;
             "tools/call")
                 local tool_name
@@ -345,7 +385,6 @@ handle_mcp() {
                     skill_name=$(printf "%s" "$payload" | jq -r '.params.arguments.skill_name')
 
                     local output
-                    # Execute download silently to stdout, capturing stderr into the output string
                     output=$(handle_download "$skill_name" 2>&1 || echo "Execution failed")
 
                     local safe_output
@@ -357,7 +396,6 @@ handle_mcp() {
                 fi
                 ;;
             "notifications/initialized")
-                # Acknowledge quietly
                 ;;
             *)
                 if [[ -n "$id" && "$id" != "null" ]]; then
@@ -376,8 +414,6 @@ if [ $# -eq 0 ]; then
     exit 0
 fi
 
-SELECTED_AGENTS=""
-
 case "$1" in
     select)
         SELECTED_AGENTS=$(interactive_multiselect)
@@ -392,9 +428,15 @@ case "$1" in
     mcp)
         handle_mcp
         ;;
-    *)
-        log_error "Unknown command: $1"
+    -h|--help)
+        print_usage
+        ;;
+    -*)
+        log_error "Unknown flag: $1"
         print_usage
         exit 1
+        ;;
+    *)
+        handle_download "$@"
         ;;
 esac
