@@ -5,17 +5,77 @@
     "mvi-architecture": {
       "version": "1.0.0",
       "description": "Strict Model-View-Intent architectural guidelines for Android",
-      "file": "mvi-architecture.md"
+      "file": "android/mvi-architecture.md"
     },
     "compose-guidelines": {
       "version": "1.2.1",
       "description": "Jetpack Compose performance and styling rules",
-      "file": "compose-guidelines.md"
+      "file": "android/compose-guidelines.md"
     },
     "room-db": {
       "version": "2.0.0",
       "description": "Room Database setup and DAO best practices",
-      "file": "room-db.md"
+      "file": "android/room-db.md"
+    },
+    "base-guideline": {
+      "version": "1.0.0",
+      "description": "Base architectural guidelines for Kotlin development",
+      "file": "kotlin/base-guideline.md"
+    },
+    "cmp-architecture": {
+      "version": "1.0.0",
+      "description": "Compose Multiplatform architectural patterns",
+      "file": "cmp/cmp-architecture.md"
+    },
+    "cmp-data-layer": {
+      "version": "1.0.0",
+      "description": "Data layer patterns for CMP",
+      "file": "cmp/cmp-data-layer.md"
+    },
+    "cmp-di-koin": {
+      "version": "1.0.0",
+      "description": "Dependency injection with Koin in CMP",
+      "file": "cmp/cmp-di-koin.md"
+    },
+    "cmp-gradle": {
+      "version": "1.0.0",
+      "description": "Gradle configuration for CMP projects",
+      "file": "cmp/cmp-gradle.md"
+    },
+    "cmp-init": {
+      "version": "1.0.0",
+      "description": "Initialization guide for CMP projects",
+      "file": "cmp/cmp-init.md"
+    },
+    "cmp-kotlin": {
+      "version": "1.0.0",
+      "description": "Kotlin-specific rules for CMP",
+      "file": "cmp/cmp-kotlin.md"
+    },
+    "cmp-mvi-vm": {
+      "version": "1.0.0",
+      "description": "MVI and ViewModel implementation in CMP",
+      "file": "cmp/cmp-mvi-vm.md"
+    },
+    "cmp-navigation": {
+      "version": "1.0.0",
+      "description": "Navigation patterns in CMP",
+      "file": "cmp/cmp-navigation.md"
+    },
+    "cmp-scaffold": {
+      "version": "1.0.0",
+      "description": "Project scaffolding guidelines for CMP",
+      "file": "cmp/cmp-scaffold.md"
+    },
+    "cmp-theming": {
+      "version": "1.0.0",
+      "description": "Design system and theming in CMP",
+      "file": "cmp/cmp-theming.md"
+    },
+    "cmp-ui": {
+      "version": "1.0.0",
+      "description": "UI component standards for CMP",
+      "file": "cmp/cmp-ui.md"
     }
   }
 }

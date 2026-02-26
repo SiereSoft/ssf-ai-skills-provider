@@ -9,7 +9,7 @@ AGENT_REGISTRY_VALUES=(".claude/skills/" ".claude/skills/" ".cursor/rules/" ".op
 
 LOCAL_TRACKER_FILE=".ssf-agent-versions"
 CONFIG_FILE=".ssf-agent-config"
-REMOTE_BASE_URL="${AGENT_BOOT_REMOTE_URL:-https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/}"
+REMOTE_BASE_URL="${AGENT_BOOT_REMOTE_URL:-https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/main/}"
 VERSIONS_FILE="versions.json"
 
 # --- Output Formatting ---
@@ -306,7 +306,7 @@ handle_download() {
                 # Clean before checking path
                 check_agent=$(echo "$agent" | tr -d '\r\n ')
                 check_dir=$(get_agent_path "$(echo "$check_agent" | tr '[:upper:]' '[:lower:]')")
-                if [ -n "$check_dir" ] && [ ! -f "$check_dir/$skill_file" ]; then
+                if [ -n "$check_dir" ] && [ ! -f "$check_dir/${skill_file##*/}" ]; then
                     force_download=1
                     break
                 fi
@@ -359,13 +359,15 @@ handle_download() {
         fi
 
         # The target_dir already includes a trailing slash (e.g. .claude/skills/)
-        if ! printf "%s\n" "$skill_content" > "${target_dir}${skill_file}" 2>/dev/null; then
-            log_error "Failed to write file to $PWD/${target_dir}${skill_file}"
+        # skill_file might now contain a category path (e.g. android/mvi-architecture.md)
+        local target_file_path="${target_dir}${skill_file##*/}"
+        if ! printf "%s\n" "$skill_content" > "$target_file_path" 2>/dev/null; then
+            log_error "Failed to write file to $PWD/$target_file_path"
             exit 1
         fi
 
         # Log the absolute path so we know exactly where it landed
-        log_info " -> Placed in $PWD/${target_dir}${skill_file}"
+        log_info " -> Placed in $PWD/$target_file_path"
     done
 
     touch "$LOCAL_TRACKER_FILE" 2>/dev/null || { log_error "Insufficient directory permissions."; exit 1; }

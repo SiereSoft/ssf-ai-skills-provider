@@ -25,7 +25,7 @@ AI agents are powerful but prone to hallucinations when they don't have project-
 Install `ssf-agent` directly into your user-space binary folder. This avoids the need for `sudo` now and in the future:
 
 ```bash
-mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/ssf-agent -o ~/.local/bin/ssf-agent && chmod +x ~/.local/bin/ssf-agent
+mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/main/ssf-agent -o ~/.local/bin/ssf-agent && chmod +x ~/.local/bin/ssf-agent
 ```
 *Note: Ensure `~/.local/bin` is in your `PATH`.*
 
@@ -33,7 +33,7 @@ mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/SiereSoft/s
 If you prefer a global installation, you can still use the traditional method. `ssf-agent` will automatically offer to migrate to user-space during its first update to eliminate `sudo` friction:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/ssf-agent -o ssf-agent && chmod +x ssf-agent && sudo mv ssf-agent /usr/local/bin/ssf-agent
+curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/main/ssf-agent -o ssf-agent && chmod +x ssf-agent && sudo mv ssf-agent /usr/local/bin/ssf-agent
 ```
 
 *Note: Requires `curl` to be installed on your system.*
