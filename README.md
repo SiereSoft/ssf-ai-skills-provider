@@ -40,6 +40,8 @@ ssf-agent select
 Download a skill to your configured agents:
 ```bash
 ssf-agent download mvi-architecture
+# or download the minified version to save tokens
+ssf-agent download mvi-architecture --minified
 ```
 
 ### 3. Specify Agent(s) via Flag
@@ -101,6 +103,51 @@ The tool automatically maps skills to the correct directory for these agents:
 | **Gemini CLI** | `gemini` | `.gemini/skills/` |
 | **Antigravity** | `antigravity` | `.agent.antigravity/skills/` |
 | ... and many more (see CLI help) | | |
+
+## Minified skills and Git pre-commit hook
+
+### Download a minified version of a skill
+You can ask `ssf-agent` to fetch the pre-minified variant of a skill (when available) using the `--minified` flag:
+
+```bash
+ssf-agent download mvi-architecture --minified
+# or the short form
+ssf-agent download mvi-architecture -m
+```
+
+- You can combine this with `--agent`:
+```bash
+ssf-agent download compose-guidelines --minified --agent=cursor,claude
+```
+- If a minified file does not exist yet for a given skill, the tool will print a hint to retry without `--minified`.
+- Even when downloading a minified file, it is saved locally using the standard filename from the registry (for example `mvi-architecture.md`).
+
+### Enable auto-minification on commit (Git hook)
+A lightweight pre-commit hook is included to automatically generate and stage `*.min.md` files for any changed skills in `skills/`.
+
+1) Install the hook (one-time per repo clone):
+```bash
+npm run setup
+```
+This copies `scripts/pre-commit` into `.git/hooks/pre-commit` and makes it executable.
+
+2) Commit as usual. When you stage and commit skill Markdown files (e.g. `skills/new-guideline.md`), the hook will:
+- Generate or update the corresponding `skills/new-guideline.min.md` using `scripts/minify.mjs`.
+- Automatically `git add` the new/updated `*.min.md` so it is included in the same commit.
+- Abort the commit if minification fails.
+
+Notes:
+- The minifier currently warns when a minified skill exceeds the token budget of 500 tokens. Consider splitting the skill if you see a warning.
+- Already-minified files (`*.min.md`) are ignored by the hook.
+
+### Manually run the minifier
+If you want to run the minifier yourself (outside of Git hooks):
+```bash
+node scripts/minify.mjs skills/mvi-architecture.md
+# You can pass multiple files as arguments
+node scripts/minify.mjs skills/mvi-architecture.md skills/compose-guidelines.md
+```
+This will write/update `*.min.md` files next to the originals and stage them if run inside a Git repository.
 
 ## License
 
