@@ -323,7 +323,11 @@ handle_download() {
     for agent in "${target_agents[@]}"; do
         # Absolute sanitization before file system operations
         agent=$(echo "$agent" | tr -d '\r\n ')
-        target_dir=$(get_agent_path "$(echo "$agent" | tr '[:upper:]' '[:lower:]')")
+
+        local raw_dir
+        raw_dir=$(get_agent_path "$(echo "$agent" | tr '[:upper:]' '[:lower:]')")
+        # Strip any hidden characters from the directory string
+        target_dir=$(echo "$raw_dir" | tr -d '\r\n ')
 
         if [ -z "$target_dir" ]; then
             log_error "WARNING: Unsupported agent '$agent'. Skipping."
@@ -335,11 +339,14 @@ handle_download() {
             exit 1
         fi
 
-        if ! printf "%s\n" "$skill_content" > "$target_dir/$skill_file" 2>/dev/null; then
-            log_error "Insufficient directory permissions for $target_dir."
+        # The target_dir already includes a trailing slash (e.g. .claude/skills/)
+        if ! printf "%s\n" "$skill_content" > "${target_dir}${skill_file}" 2>/dev/null; then
+            log_error "Failed to write file to $PWD/${target_dir}${skill_file}"
             exit 1
         fi
-        log_info " -> Placed in $target_dir"
+
+        # Log the absolute path so we know exactly where it landed
+        log_info " -> Placed in $PWD/${target_dir}${skill_file}"
     done
 
     touch "$LOCAL_TRACKER_FILE" 2>/dev/null || { log_error "Insufficient directory permissions."; exit 1; }
