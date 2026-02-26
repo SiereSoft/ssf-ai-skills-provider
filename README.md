@@ -6,6 +6,7 @@ The **SSF AI Skill Provider** is a lightweight CLI tool that fetches and install
 
 ## Features
 
+* **Zero-Sudo / Rootless:** Automatically migrates to user space (`~/.local/bin`) if installed in a system folder, ensuring future updates never require root privileges.
 * **Zero-Configuration:** A standalone Bash script. No Kotlin compiler, Gradle syncs or heavy binaries required.
 * **Agent-Aware:** Automatically routes Markdown rules to the correct hidden directories (e.g., `.cursor/rules/`, `.windsurf/rules/`).
 * **Native MCP Integration:** Natively speaks JSON-RPC 2.0 over stdio, allowing agents to execute tools directly (e.g., `download_skill`) rather than just reading documentation.
@@ -20,7 +21,16 @@ AI agents are powerful but prone to hallucinations when they don't have project-
 
 ## Installation
 
-Run this single command to install `ssf-agent` globally on your machine:
+### Method 1: Rootless (Recommended)
+Install `ssf-agent` directly into your user-space binary folder. This avoids the need for `sudo` now and in the future:
+
+```bash
+mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/ssf-agent -o ~/.local/bin/ssf-agent && chmod +x ~/.local/bin/ssf-agent
+```
+*Note: Ensure `~/.local/bin` is in your `PATH`.*
+
+### Method 2: Global
+If you prefer a global installation, you can still use the traditional method. `ssf-agent` will automatically offer to migrate to user-space during its first update to eliminate `sudo` friction:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/develop/ssf-agent -o ssf-agent && chmod +x ssf-agent && sudo mv ssf-agent /usr/local/bin/ssf-agent
@@ -63,13 +73,13 @@ ssf-agent update
 Because `ssf-agent` now natively speaks JSON-RPC over stdio, you can plug it directly into tools like Claude Desktop or Cursor as an MCP (Model Context Protocol) server.
 
 #### For Claude Desktop
-Add the script to your `claude_desktop_config.json`:
+Add the script to your `claude_desktop_config.json`. We recommend using the rootless path:
 
 ```json
 {
   "mcpServers": {
     "ssf-provider": {
-      "command": "/usr/local/bin/ssf-agent",
+      "command": "/Users/YOUR_USER/.local/bin/ssf-agent",
       "args": ["mcp"]
     }
   }
@@ -81,7 +91,7 @@ Add the script to your `claude_desktop_config.json`:
 2. Click **+ Add New MCP Server**.
 3. Name: `ssf-provider`
 4. Type: `command`
-5. Command: `/usr/local/bin/ssf-agent mcp`
+5. Command: `/Users/YOUR_USER/.local/bin/ssf-agent mcp`
 
 ## Supported AI Agents
 

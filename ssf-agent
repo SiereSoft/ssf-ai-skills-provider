@@ -183,13 +183,6 @@ handle_update() {
 
     if ! curl -sSfL --connect-timeout 5 "$script_url" -o "$temp_file" 2>/dev/null; then
         log_error "Failed to download update. Network unreachable or file missing."
-        rm -f "$temp_file"
-        exit 1
-    fi
-
-    if ! head -n 1 "$temp_file" | grep -q "#!/bin/bash"; then
-        log_error "Downloaded file is invalid. Update aborted."
-        rm -f "$temp_file"
         exit 1
     fi
 
@@ -200,8 +193,34 @@ handle_update() {
         current_script_path="$(command -v "$0")"
     fi
 
+    # Check if we lack write access to the current location (e.g., /usr/local/bin)
+    if [ ! -w "$(dirname "$current_script_path")" ] || ( [ -e "$current_script_path" ] && [ ! -w "$current_script_path" ] ); then
+
+        # We don't have permission. Let's do an automatic rootless migration!
+        local user_bin="$HOME/.local/bin"
+
+        log_info "System-level path detected ($current_script_path)."
+        log_info "Migrating ssf-agent to user space ($user_bin) to permanently avoid sudo..."
+
+        mkdir -p "$user_bin"
+
+        if mv "$temp_file" "$user_bin/ssf-agent" 2>/dev/null; then
+            chmod +x "$user_bin/ssf-agent"
+            log_success "Success! ssf-agent is now running entirely rootless."
+            log_success "-> New location: $user_bin/ssf-agent"
+            log_info "Note: If $user_bin is not in your PATH, you may need to add it."
+            exit 0
+        else
+            log_error "Migration failed. Could not write to $user_bin."
+            rm -f "$temp_file"
+            exit 1
+        fi
+    fi
+
+    # Standard in-place update if the script is ALREADY in a user-owned folder
     if ! mv "$temp_file" "$current_script_path" 2>/dev/null; then
-        log_error "Permission denied. Try running: sudo ssf-agent update"
+        log_error "Failed to write the updated file to $current_script_path."
+        log_info "If this is a system path, try running with sudo once to migrate: sudo ssf-agent update"
         rm -f "$temp_file"
         exit 1
     fi
