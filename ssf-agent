@@ -51,7 +51,7 @@ print_usage() {
     agents=${agents%, }
     printf "Usage:\n" >&2
     printf "  ./ssf-agent select                        (Configure your default AI agents)\n" >&2
-    printf "  ./ssf-agent download <skill> [--agent=]   (Download/update a skill)\n" >&2
+    printf "  ./ssf-agent download <skill> [--agent=] [--minified|-m] (Download/update a skill)\n" >&2
     printf "  ./ssf-agent update                        (Self-update the ssf-agent script)\n" >&2
     printf "  ./ssf-agent mcp                           (Start JSON-RPC 2.0 stdio server)\n\n" >&2
     printf "Supported Agents: %s\n" "$agents" >&2
@@ -195,10 +195,13 @@ handle_download() {
     fi
     local skill_name=$1
     local target_agents_str=""
+    local use_minified=0
 
     for arg in "$@"; do
         if [[ "$arg" == --agent=* ]]; then
             target_agents_str="${arg#--agent=}"
+        elif [[ "$arg" == "--minified" || "$arg" == "-m" ]]; then
+            use_minified=1
         fi
     done
 
@@ -258,11 +261,20 @@ handle_download() {
         fi
     fi
 
+    local remote_skill_file="$skill_file"
+    if [ "$use_minified" -eq 1 ]; then
+        remote_skill_file="${skill_file%.*}.min.md"
+        log_info "Using optimized token footprint (--minified)..."
+    fi
+
     log_info "Downloading skill $skill_name (v$remote_version)..."
     local skill_content
-    skill_content=$(curl -sSfL --connect-timeout 5 "${REMOTE_BASE_URL}skills/$skill_file" 2>/dev/null || true)
+    skill_content=$(curl -sSfL --connect-timeout 5 "${REMOTE_BASE_URL}skills/$remote_skill_file" 2>/dev/null || true)
     if [ -z "$skill_content" ]; then
-        log_error "Failed to download skill file '$skill_file'."
+        log_error "Failed to download skill file '$remote_skill_file'."
+        if [ "$use_minified" -eq 1 ]; then
+            log_error "Hint: The minified version might not exist yet. Try without the --minified flag."
+        fi
         exit 1
     fi
 
@@ -281,6 +293,7 @@ handle_download() {
             exit 1
         fi
 
+        # We save it as standard $skill_file (.md), not $remote_skill_file (.min.md)
         if ! printf "%s\n" "$skill_content" > "$target_dir/$skill_file" 2>/dev/null; then
             log_error "Insufficient directory permissions for $target_dir."
             exit 1
