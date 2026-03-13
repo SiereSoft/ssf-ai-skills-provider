@@ -2,21 +2,6 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "description": "Registry of available AI skills and their current versions",
   "skills": {
-    "mvi-architecture": {
-      "version": "1.0.0",
-      "description": "Strict Model-View-Intent architectural guidelines for Android",
-      "file": "android/mvi-architecture.md"
-    },
-    "compose-guidelines": {
-      "version": "1.2.1",
-      "description": "Jetpack Compose performance and styling rules",
-      "file": "android/compose-guidelines.md"
-    },
-    "room-db": {
-      "version": "2.0.0",
-      "description": "Room Database setup and DAO best practices",
-      "file": "android/room-db.md"
-    },
     "base-guideline": {
       "version": "1.0.0",
       "description": "Base architectural guidelines for Kotlin development",
