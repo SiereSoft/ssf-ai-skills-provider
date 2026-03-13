@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Find all staged .md files in the skills directory, excluding already minified ones
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^skills/.*\.md$' | grep -v '\.min\.md$' || true)
+
+if [ -n "$STAGED_FILES" ]; then
+    echo "Running AI Skill Minifier on staged files..."
+
+    # Pass the staged files to our Node.js minifier
+    node scripts/minify.mjs $STAGED_FILES
+
+    # Check if the Node script failed
+    if [ $? -ne 0 ]; then
+        echo "❌ Minification failed. Commit aborted."
+        exit 1
+    fi
+fi
+
+exit 0

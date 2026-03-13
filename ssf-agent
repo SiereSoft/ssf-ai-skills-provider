@@ -1,0 +1,470 @@
+#!/bin/bash
+
+set -e
+set -u
+
+# --- Configuration ---
+AGENT_REGISTRY_KEYS=("claude" "claude-code" "cursor" "opencode" "roo" "kilo" "windsurf" "warp" "zencoder" "codex" "gemini" "antigravity" "junie")
+AGENT_REGISTRY_VALUES=(".claude/skills/" ".claude/skills/" ".cursor/rules/" ".opencode/skills/" ".roo/rules/" ".kilocode/rules/" ".windsurf/rules/" ".warp/rules/" ".zencoder/rules/" ".codex/skills/" ".gemini/skills/" ".agent.antigravity/skills/" ".junie/")
+
+LOCAL_TRACKER_FILE=".ssf-agent-versions"
+CONFIG_FILE=".ssf-agent-config"
+REMOTE_BASE_URL="${AGENT_BOOT_REMOTE_URL:-https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/main/}"
+VERSIONS_FILE="versions.json"
+
+# --- Output Formatting ---
+C_RESET='\033[0m'
+C_RED='\033[31m'
+C_GREEN='\033[32m'
+C_CYAN='\033[36m'
+
+# In MCP mode, we strip ANSI colors from the output to prevent JSON corruption
+if [[ "${MCP_MODE:-0}" == "1" ]]; then
+    C_RESET=''
+    C_RED=''
+    C_GREEN=''
+    C_CYAN=''
+fi
+
+# All standard logs must go to stderr (>&2) to keep stdout pure for JSON-RPC
+log_info() { printf "${C_CYAN}|${C_RESET} %s\n" "$1" >&2; }
+log_success() { printf "${C_GREEN}|${C_RESET} %s\n" "$1" >&2; }
+log_error() { printf "${C_RED}|${C_RESET} %s\n" "$1" >&2; }
+
+# --- Core Functions ---
+get_agent_path() {
+    local agent=$1
+    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
+        if [[ "${AGENT_REGISTRY_KEYS[$i]}" == "$agent" ]]; then
+            printf "%s" "${AGENT_REGISTRY_VALUES[$i]}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+print_usage() {
+    local agents=""
+    for agent in "${AGENT_REGISTRY_KEYS[@]}"; do
+        agents+="$agent, "
+    done
+    agents=${agents%, }
+    printf "Usage:\n" >&2
+    printf "  ./ssf-agent select                        (Configure your default AI agents)\n" >&2
+    printf "  ./ssf-agent [download] <skill> [--min]    (Download/update a skill)\n" >&2
+    printf "  ./ssf-agent update                        (Self-update the ssf-agent script)\n" >&2
+    printf "  ./ssf-agent mcp                           (Start JSON-RPC 2.0 stdio server)\n\n" >&2
+    printf "Supported Agents: %s\n" "$agents" >&2
+}
+
+# --- Interactive TUI for Multi-Selection ---
+interactive_multiselect() {
+    local selected=()
+    local cur=0
+    local i
+
+    # Read previously configured agents and strip all hidden line endings
+    local configured_agents
+    configured_agents=$(get_configured_agents)
+    local -a conf_arr=()
+    if [ -n "$configured_agents" ]; then
+        IFS=',' read -r -a conf_arr <<< "$configured_agents"
+    fi
+
+    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
+        selected[$i]=0
+        if [ ${#conf_arr[@]} -gt 0 ]; then
+            for ca in "${conf_arr[@]}"; do
+                # Clean any rogue spaces or newlines that snuck into the array
+                local clean_ca
+                clean_ca=$(echo "$ca" | tr -d '\r\n ')
+                if [[ "${AGENT_REGISTRY_KEYS[$i]}" == "$clean_ca" ]]; then
+                    selected[$i]=1
+                    break
+                fi
+            done
+        fi
+    done
+
+    printf "\nSelect your target AI agents (Use ARROW KEYS to move, SPACE to toggle, ENTER to confirm):\n\n" >&2
+
+    tput civis >&2 2>/dev/null || true
+
+    while true; do
+        for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
+            local prefix="  "
+            local box="[ ]"
+
+            [ $i -eq $cur ] && prefix="> "
+            [ ${selected[$i]} -eq 1 ] && box="[x]"
+
+            printf "\033[K%s%s %s\n" "$prefix" "$box" "${AGENT_REGISTRY_KEYS[$i]}" >&2
+        done
+
+        IFS= read -rsn1 key
+
+        if [[ "$key" == $'\x1b' ]]; then
+            local seq
+            IFS= read -rsn2 -t 1 seq || true
+            if [[ "$seq" == "[A" ]]; then ((cur--)); fi
+            if [[ "$seq" == "[B" ]]; then ((cur++)); fi
+        elif [[ "$key" == " " ]]; then
+            selected[$cur]=$((1 - selected[$cur]))
+        elif [[ "$key" == "" ]]; then
+            break
+        fi
+
+        [ $cur -lt 0 ] && cur=0
+        [ $cur -ge ${#AGENT_REGISTRY_KEYS[@]} ] && cur=$((${#AGENT_REGISTRY_KEYS[@]}-1))
+
+        printf "\033[%sA" "${#AGENT_REGISTRY_KEYS[@]}" >&2
+    done
+
+    tput cnorm >&2 2>/dev/null || true
+
+    local chosen=()
+    for i in "${!AGENT_REGISTRY_KEYS[@]}"; do
+        if [ ${selected[$i]} -eq 1 ]; then
+            chosen+=("${AGENT_REGISTRY_KEYS[$i]}")
+        fi
+    done
+
+    if [ ${#chosen[@]} -eq 0 ]; then
+        log_error "No agents selected. Aborting."
+        exit 1
+    fi
+
+    local IFS=','
+    local result="${chosen[*]}"
+    printf "%s" "$result"
+}
+
+save_config() {
+    local chosen_agents="$1"
+    echo "DEFAULT_AGENTS=\"$chosen_agents\"" > "$CONFIG_FILE"
+    log_success "Saved agents to $CONFIG_FILE ($chosen_agents)"
+}
+
+get_configured_agents() {
+    if [ -f "$CONFIG_FILE" ]; then
+        # Aggressively strip \r and \n to prevent matching failures
+        grep "^DEFAULT_AGENTS=" "$CONFIG_FILE" | cut -d'"' -f2 | tr -d '\r\n' || true
+    else
+        printf ""
+    fi
+}
+
+version_gt() {
+    [ "$1" = "$2" ] && return 1
+    local IFS=.
+    local i ver1 ver2
+    ver1=($1)
+    ver2=($2)
+    for ((i=${#ver1[@]}; i<${#ver2[@]}; i++)); do ver1[i]=0; done
+    for ((i=0; i<${#ver1[@]}; i++)); do
+        if [[ -z ${ver2[i]:-} ]]; then ver2[i]=0; fi
+        if ((10#${ver1[i]} > 10#${ver2[i]})); then return 0; fi
+        if ((10#${ver1[i]} < 10#${ver2[i]})); then return 1; fi
+    done
+    return 1
+}
+
+check_dependencies() {
+    if ! command -v curl &> /dev/null; then
+        log_error "curl is not installed. Please install it to use ssf-agent."
+        exit 1
+    fi
+}
+
+handle_update() {
+    log_info "Downloading latest ssf-agent script..."
+    local script_url="${REMOTE_BASE_URL}ssf-agent"
+    local temp_file="/tmp/ssf-agent-update.$$"
+
+    if ! curl -sSfL --connect-timeout 5 "$script_url" -o "$temp_file" 2>/dev/null; then
+        log_error "Failed to download update. Network unreachable or file missing."
+        exit 1
+    fi
+
+    local current_script_path
+    if [[ "$0" == /* ]]; then
+        current_script_path="$0"
+    else
+        current_script_path="$(command -v "$0")"
+    fi
+
+    # Check if we lack write access to the current location (e.g., /usr/local/bin)
+    if [ ! -w "$(dirname "$current_script_path")" ] || ( [ -e "$current_script_path" ] && [ ! -w "$current_script_path" ] ); then
+
+        # We don't have permission. Let's do an automatic rootless migration!
+        local user_bin="$HOME/.local/bin"
+
+        log_info "System-level path detected ($current_script_path)."
+        log_info "Migrating ssf-agent to user space ($user_bin) to permanently avoid sudo..."
+
+        mkdir -p "$user_bin"
+
+        if mv "$temp_file" "$user_bin/ssf-agent" 2>/dev/null; then
+            chmod +x "$user_bin/ssf-agent"
+            log_success "Success! ssf-agent is now running entirely rootless."
+            log_success "-> New location: $user_bin/ssf-agent"
+            log_info "Note: If $user_bin is not in your PATH, you may need to add it."
+            exit 0
+        else
+            log_error "Migration failed. Could not write to $user_bin."
+            rm -f "$temp_file"
+            exit 1
+        fi
+    fi
+
+    # Standard in-place update if the script is ALREADY in a user-owned folder
+    if ! mv "$temp_file" "$current_script_path" 2>/dev/null; then
+        log_error "Failed to write the updated file to $current_script_path."
+        log_info "If this is a system path, try running with sudo once to migrate: sudo ssf-agent update"
+        rm -f "$temp_file"
+        exit 1
+    fi
+
+    chmod +x "$current_script_path"
+    log_success "ssf-agent successfully updated to the latest version!"
+}
+
+handle_download() {
+    if [[ -z "${1:-}" ]]; then
+        print_usage
+        exit 1
+    fi
+    local skill_name=$1
+    local target_agents_str=""
+    local use_minified=0
+
+    for arg in "$@"; do
+        if [[ "$arg" == --agent=* ]]; then
+            target_agents_str="${arg#--agent=}"
+        elif [[ "$arg" == "--minified" || "$arg" == "-m" || "$arg" == "--min" ]]; then
+            use_minified=1
+        fi
+    done
+
+    if [ -z "$target_agents_str" ]; then
+        target_agents_str=$(get_configured_agents)
+
+        if [ -z "$target_agents_str" ]; then
+            if [[ "${MCP_MODE:-0}" == "1" ]]; then
+                target_agents_str="claude,cursor"
+            else
+                log_info "No agents configured."
+                target_agents_str=$(interactive_multiselect)
+                save_config "$target_agents_str"
+            fi
+        fi
+    fi
+
+    local -a target_agents
+    IFS=',' read -r -a target_agents <<< "$target_agents_str"
+
+    log_info "Fetching remote registry..."
+    local remote_registry
+    remote_registry=$(curl -sSfL --connect-timeout 5 "$REMOTE_BASE_URL$VERSIONS_FILE" 2>/dev/null || true)
+
+    if [[ -z "$remote_registry" ]]; then
+        log_error "Network unreachable or file missing. Cannot fetch skills."
+        exit 1
+    fi
+
+    local skill_block
+    skill_block=$(printf "%s" "$remote_registry" | awk "/\"$skill_name\":/,/\}/")
+    if [ -z "$skill_block" ]; then
+        log_error "Skill '$skill_name' not found in repository."
+        exit 1
+    fi
+
+    # Strip hidden characters from remote parsing
+    local remote_version
+    remote_version=$(printf "%s" "$skill_block" | grep -o '"version": *"[^"]*"' | cut -d'"' -f4 | tr -d '\r\n')
+    local skill_file
+    skill_file=$(printf "%s" "$skill_block" | grep -o '"file": *"[^"]*"' | cut -d'"' -f4 | tr -d '\r\n')
+
+    if [ -z "$remote_version" ] || [ -z "$skill_file" ]; then
+         log_error "Skill '$skill_name' not found in repository."
+         exit 1
+    fi
+
+    # Strip hidden characters from local tracking file
+    local current_local_version=""
+    if [ -f "$LOCAL_TRACKER_FILE" ]; then
+        current_local_version=$(grep "^$skill_name=" "$LOCAL_TRACKER_FILE" | cut -d'=' -f2 | tr -d '\r\n' || true)
+    fi
+
+    local force_download=0
+    if [ -n "$current_local_version" ]; then
+        if version_gt "$remote_version" "$current_local_version"; then
+            force_download=1
+        else
+            for agent in "${target_agents[@]}"; do
+                local check_agent check_dir
+                # Clean before checking path
+                check_agent=$(echo "$agent" | tr -d '\r\n ')
+                check_dir=$(get_agent_path "$(echo "$check_agent" | tr '[:upper:]' '[:lower:]')")
+                if [ -n "$check_dir" ] && [ ! -f "$check_dir/${skill_file##*/}" ]; then
+                    force_download=1
+                    break
+                fi
+            done
+        fi
+    else
+        force_download=1
+    fi
+
+    if [ "$force_download" -eq 0 ]; then
+        log_info "Skill '$skill_name' is already up to date (v$current_local_version)."
+        return
+    fi
+
+    local remote_skill_file="$skill_file"
+    if [ "$use_minified" -eq 1 ]; then
+        remote_skill_file="${skill_file%.*}.min.md"
+        log_info "Using optimized token footprint (--min)..."
+    fi
+
+    log_info "Downloading skill $skill_name (v$remote_version)..."
+    local skill_content
+    skill_content=$(curl -sSfL --connect-timeout 5 "${REMOTE_BASE_URL}skills/$remote_skill_file" 2>/dev/null || true)
+    if [ -z "$skill_content" ]; then
+        log_error "Failed to download skill file '$remote_skill_file'."
+        if [ "$use_minified" -eq 1 ]; then
+            log_error "Hint: The minified version might not exist yet. Try without the --min flag."
+        fi
+        exit 1
+    fi
+
+    local agent target_dir
+    for agent in "${target_agents[@]}"; do
+        # Absolute sanitization before file system operations
+        agent=$(echo "$agent" | tr -d '\r\n ')
+
+        local raw_dir
+        raw_dir=$(get_agent_path "$(echo "$agent" | tr '[:upper:]' '[:lower:]')")
+        # Strip any hidden characters from the directory string
+        target_dir=$(echo "$raw_dir" | tr -d '\r\n ')
+
+        if [ -z "$target_dir" ]; then
+            log_error "WARNING: Unsupported agent '$agent'. Skipping."
+            continue
+        fi
+
+        if ! mkdir -p "$target_dir" 2>/dev/null; then
+            log_error "Insufficient directory permissions for $target_dir."
+            exit 1
+        fi
+
+        # The target_dir already includes a trailing slash (e.g. .claude/skills/)
+        # skill_file might now contain a category path (e.g. android/mvi-architecture.md)
+        local target_file_path="${target_dir}${skill_file##*/}"
+        if ! printf "%s\n" "$skill_content" > "$target_file_path" 2>/dev/null; then
+            log_error "Failed to write file to $PWD/$target_file_path"
+            exit 1
+        fi
+
+        # Log the absolute path so we know exactly where it landed
+        log_info " -> Placed in $PWD/$target_file_path"
+    done
+
+    touch "$LOCAL_TRACKER_FILE" 2>/dev/null || { log_error "Insufficient directory permissions."; exit 1; }
+    grep -v "^$skill_name=" "$LOCAL_TRACKER_FILE" > "${LOCAL_TRACKER_FILE}.tmp" 2>/dev/null || true
+    printf "%s=%s\n" "$skill_name" "$remote_version" >> "${LOCAL_TRACKER_FILE}.tmp"
+    mv "${LOCAL_TRACKER_FILE}.tmp" "$LOCAL_TRACKER_FILE"
+
+    local action="installed"
+    [ -n "$current_local_version" ] && action="updated to"
+    log_success "Skill '$skill_name' $action v$remote_version for $target_agents_str"
+}
+
+# --- MCP Stdio Server Integration ---
+handle_mcp() {
+    if ! command -v jq &> /dev/null; then
+        log_error "jq is required to run the MCP server. Please install it (e.g., brew install jq)."
+        exit 1
+    fi
+
+    export MCP_MODE=1
+
+    while IFS= read -r payload; do
+        if [ -z "$payload" ]; then continue; fi
+
+        local method
+        method=$(printf "%s" "$payload" | jq -r '.method // empty')
+        local id
+        id=$(printf "%s" "$payload" | jq -r '.id // empty')
+
+        case "$method" in
+            "initialize")
+                printf '{"jsonrpc": "2.0", "id": %s, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "ssf-agent-mcp", "version": "1.0.0"}}}\n' "$id"
+                ;;
+            "tools/list")
+                printf '{"jsonrpc": "2.0", "id": %s, "result": {"tools": [{"name": "download_skill", "description": "Download an AI skill/rule from the organizational registry directly into the local project structure.", "inputSchema": {"type": "object", "properties": {"skill_name": {"type": "string", "description": "The exact name of the skill to fetch"}}, "required": ["skill_name"]}}]}}\n' "$id"
+                ;;
+            "tools/call")
+                local tool_name
+                tool_name=$(printf "%s" "$payload" | jq -r '.params.name')
+
+                if [[ "$tool_name" == "download_skill" ]]; then
+                    local skill_name
+                    skill_name=$(printf "%s" "$payload" | jq -r '.params.arguments.skill_name')
+
+                    local output
+                    output=$(handle_download "$skill_name" 2>&1 || echo "Execution failed")
+
+                    local safe_output
+                    safe_output=$(printf "%s" "$output" | jq -Rs .)
+
+                    printf '{"jsonrpc": "2.0", "id": %s, "result": {"content": [{"type": "text", "text": %s}]}}\n' "$id" "$safe_output"
+                else
+                    printf '{"jsonrpc": "2.0", "id": %s, "error": {"code": -32601, "message": "Method not found"}}\n' "$id"
+                fi
+                ;;
+            "notifications/initialized")
+                ;;
+            *)
+                if [[ -n "$id" && "$id" != "null" ]]; then
+                    printf '{"jsonrpc": "2.0", "id": %s, "error": {"code": -32601, "message": "Method not found"}}\n' "$id"
+                fi
+                ;;
+        esac
+    done
+}
+
+# --- Main Execution ---
+check_dependencies
+
+if [ $# -eq 0 ]; then
+    print_usage
+    exit 0
+fi
+
+case "$1" in
+    select)
+        SELECTED_AGENTS=$(interactive_multiselect)
+        save_config "$SELECTED_AGENTS"
+        ;;
+    download)
+        handle_download "${@:2}"
+        ;;
+    update)
+        handle_update
+        ;;
+    mcp)
+        handle_mcp
+        ;;
+    -h|--help)
+        print_usage
+        ;;
+    -*)
+        log_error "Unknown flag: $1"
+        print_usage
+        exit 1
+        ;;
+    *)
+        handle_download "$@"
+        ;;
+esac

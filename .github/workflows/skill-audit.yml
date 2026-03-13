@@ -1,0 +1,78 @@
+name: SSF Skill Security Audit
+run-name: Security Audit - ${{ github.ref_name }}
+
+on:
+  workflow_dispatch: # Adds a "Run workflow" button in the GitHub UI
+  push:
+    branches: ['**']
+    paths:
+      - 'skills/**/scripts/**' # Scan only when executable logic changes
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'skills/**/scripts/**'
+
+# Ensure only one audit runs per commit to save resources
+concurrency:
+  group: audit-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # --- JOB 1: Socket Supply Chain Audit ---
+  socket-audit:
+    name: Socket Malware Scan
+    permissions:
+      issues: write
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
+
+      - name: Set up Python for Socket CLI
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Socket CLI
+        run: pip install socketsecurity --upgrade
+
+      - name: Run Socket Scan
+        env:
+          SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_SECURITY_API_KEY }}
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=0
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            PR_NUMBER=${{ github.event.pull_request.number }}
+          fi
+          socketcli --target-path $GITHUB_WORKSPACE --scm github --pr-number $PR_NUMBER
+
+  # --- JOB 2: Snyk Vulnerability Audit ---
+  snyk-audit:
+    name: Snyk Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A. Scan Python Skills
+      - name: Snyk Python Scan
+        uses: snyk/actions/python@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects
+
+      # B. Scan Node/JS Skills
+      - name: Snyk Node Scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects

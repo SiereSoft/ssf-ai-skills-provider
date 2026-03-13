@@ -1,0 +1,44 @@
+name: Validate Registry
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js (for JSON validation)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate versions.json exists
+        run: |
+          if [ ! -f versions.json ]; then
+            echo "ERROR: versions.json not found!"
+            exit 1
+          fi
+
+      - name: Validate all skills in versions.json exist in skills/ directory
+        run: |
+          # Use node to parse JSON and check files
+          node -e '
+            const fs = require("fs");
+            const data = JSON.parse(fs.readFileSync("versions.json", "utf8"));
+            const skills = data.skills;
+            let error = false;
+            for (const [name, info] of Object.entries(skills)) {
+              const skillPath = "skills/" + info.file;
+              if (!fs.existsSync(skillPath)) {
+                console.error(`ERROR: Skill file "${skillPath}" (referenced by "${name}") does not exist.`);
+                error = true;
+              }
+            }
+            if (error) process.exit(1);
+            console.log("All skills in versions.json are verified to exist in the skills/ directory.");
+          '

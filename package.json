@@ -1,0 +1,13 @@
+{
+  "name": "ssf-ai-skills-provider",
+  "version": "1.0.0",
+  "description": "AI skills repository and CLI provider",
+  "type": "module",
+  "scripts": {
+    "setup": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit",
+    "minify:test": "node scripts/minify.mjs skills/base-guideline.md"
+  },
+  "dependencies": {
+    "tiktoken": "^1.0.17"
+  }
+}
