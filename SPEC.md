@@ -4,10 +4,10 @@
 The SSF AI Skill Provider is a lightweight, open-source CLI tool designed for Android developers to fetch and install AI agent "skills" (contextual guardrails and architectural rules) from a central GitHub repository. It bridges the gap between standardized Android development practices and autonomous AI agents by automatically placing downloaded markdown rules into the specific local directories required by different AI models. It uses a centralized remote versions.json registry to handle precise version control and updates.
 
 ## Behavioral Contract
-*   When the user executes the download command (e.g., `./ssf-agent download <skill-name>`) without specifying an agent flag, the system interactively prompts the user to select their target AI agent from the supported registry to determine the correct local directory path.
-*   When the user executes the command with the agent flag (e.g., `./ssf-agent download mvi-architecture --agent=cursor`), the system bypasses the interactive prompt and uses the specified agent.
+*   When the user executes the download command (e.g., `./ssf-provider download <skill-name>`) without specifying an agent flag, the system interactively prompts the user to select their target AI agent from the supported registry to determine the correct local directory path.
+*   When the user executes the command with the agent flag (e.g., `./ssf-provider download mvi-architecture --agent=cursor`), the system bypasses the interactive prompt and uses the specified agent.
 *   When a valid skill name and agent are provided, the system first fetches `versions.json` from the remote GitHub repository to check the current version of the requested skill.
-*   When fetching a new skill, the system downloads the corresponding raw markdown file from the remote GitHub repository, saves it strictly in `.md` format into the targeted agent's local folder, and updates a local tracking file (e.g., `.ssf-agent-versions`) with the installed version.
+*   When fetching a new skill, the system downloads the corresponding raw markdown file from the remote GitHub repository, saves it strictly in `.md` format into the targeted agent's local folder, and updates a local tracking file (e.g., `.ssf-provider-versions`) with the installed version.
 *   When the requested skill already exists locally, the system compares the version in the remote `versions.json` against the local tracking file. It overwrites the local `.md` file and updates the local tracking file only if the remote version is strictly newer.
 *   When the remote version is identical to (or older than) the local version, the system skips the download and outputs a "Skill <name> is already up to date" message.
 *   When the network is unreachable, GitHub is unavailable, or a request times out, the system safely halts and outputs a standardized error message (e.g., `ERROR: Network unreachable. Cannot fetch skills.`).
@@ -27,8 +27,8 @@ The SSF AI Skill Provider is a lightweight, open-source CLI tool designed for An
 *   **Development Twin:** During agent development, the system should point to a local mock server or a designated testing branch/folder in GitHub to avoid rate limits.
 
 ### 2. Local File System & Target Agents
-*   **Data In:** Local read operations of `.ssf-agent-versions` to check existing installed versions.
-*   **Data Out:** Folder creation (if the target agent directory does not exist), file write operations for the `.md file, and updates to `.ssf-agent-versions`.
+*   **Data In:** Local read operations of `.ssf-provider-versions` to check existing installed versions.
+*   **Data Out:** Folder creation (if the target agent directory does not exist), file write operations for the `.md file, and updates to `.ssf-provider-versions`.
 *   **Failure State:** If the system lacks write permissions for the project root, it must output `ERROR: Insufficient directory permissions`.
 
 ## Supported Agent Registry
