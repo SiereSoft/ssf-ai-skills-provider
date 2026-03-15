@@ -52,7 +52,7 @@ print_usage() {
     agents=${agents%, }
     printf "Usage:\n" >&2
     printf "  ./ssf-provider select                        (Configure your default AI agents)\n" >&2
-    printf "  ./ssf-provider [download] <skill> [--min]    (Download/update a skill)\n" >&2
+    printf "  ./ssf-provider [download] <skill|folder|all> [--min] (Download/update skills)\n" >&2
     printf "  ./ssf-provider update                        (Self-update the ssf-provider script)\n" >&2
     printf "  ./ssf-provider mcp                           (Start JSON-RPC 2.0 stdio server)\n\n" >&2
     printf "Supported Agents: %s\n" "$agents" >&2
@@ -235,17 +235,71 @@ handle_download() {
         print_usage
         exit 1
     fi
-    local skill_name=$1
+    local query=$1
     local target_agents_str=""
     local use_minified=0
+    local agent_args=""
 
     for arg in "$@"; do
         if [[ "$arg" == --agent=* ]]; then
             target_agents_str="${arg#--agent=}"
+            agent_args="$arg"
         elif [[ "$arg" == "--minified" || "$arg" == "-m" || "$arg" == "--min" ]]; then
             use_minified=1
         fi
     done
+
+    # Fetch registry once for the entire session
+    log_info "Fetching remote registry..."
+    local remote_registry
+    remote_registry=$(curl -sSfL --connect-timeout 5 "$REMOTE_BASE_URL$VERSIONS_FILE" 2>/dev/null || true)
+
+    if [[ -z "$remote_registry" ]]; then
+        log_error "Network unreachable or file missing. Cannot fetch skills."
+        exit 1
+    fi
+
+    local -a skills_to_download=()
+
+    if [[ "$query" == "all" ]]; then
+        log_info "Preparing to download all skills..."
+        # Extract all skill keys, excluding the root "skills" key
+        while IFS= read -r line; do
+            if [[ "$line" != "skills" ]]; then
+                skills_to_download+=("$line")
+            fi
+        done < <(printf "%s" "$remote_registry" | grep -o '"[^"]*": *{' | cut -d'"' -f2)
+    elif [[ "$query" == */ ]]; then
+        local folder_prefix="${query%/}"
+        log_info "Preparing to download skills in folder '$folder_prefix'..."
+        # Extract skills that have files starting with folder_prefix/
+        while IFS= read -r skill_key; do
+            local file_path
+            file_path=$(printf "%s" "$remote_registry" | awk "/\"$skill_key\":/,/\}/" | grep -o '"file": *"[^"]*"' | cut -d'"' -f4)
+            if [[ "$file_path" == "$folder_prefix/"* ]]; then
+                skills_to_download+=("$skill_key")
+            fi
+        done < <(printf "%s" "$remote_registry" | grep -o '"[^"]*": *{' | cut -d'"' -f2)
+    else
+        # Assume it's a single skill
+        skills_to_download+=("$query")
+    fi
+
+    if [ ${#skills_to_download[@]} -eq 0 ]; then
+        log_error "No skills found matching '$query'."
+        exit 1
+    fi
+
+    for skill_name in "${skills_to_download[@]}"; do
+        download_single_skill "$skill_name" "$target_agents_str" "$use_minified" "$remote_registry"
+    done
+}
+
+download_single_skill() {
+    local skill_name=$1
+    local target_agents_str=$2
+    local use_minified=$3
+    local remote_registry=$4
 
     if [ -z "$target_agents_str" ]; then
         target_agents_str=$(get_configured_agents)
@@ -264,20 +318,11 @@ handle_download() {
     local -a target_agents
     IFS=',' read -r -a target_agents <<< "$target_agents_str"
 
-    log_info "Fetching remote registry..."
-    local remote_registry
-    remote_registry=$(curl -sSfL --connect-timeout 5 "$REMOTE_BASE_URL$VERSIONS_FILE" 2>/dev/null || true)
-
-    if [[ -z "$remote_registry" ]]; then
-        log_error "Network unreachable or file missing. Cannot fetch skills."
-        exit 1
-    fi
-
     local skill_block
     skill_block=$(printf "%s" "$remote_registry" | awk "/\"$skill_name\":/,/\}/")
     if [ -z "$skill_block" ]; then
         log_error "Skill '$skill_name' not found in repository."
-        exit 1
+        return 1
     fi
 
     # Strip hidden characters from remote parsing
@@ -288,7 +333,7 @@ handle_download() {
 
     if [ -z "$remote_version" ] || [ -z "$skill_file" ]; then
          log_error "Skill '$skill_name' not found in repository."
-         exit 1
+         return 1
     fi
 
     # Strip hidden characters from local tracking file
@@ -319,7 +364,7 @@ handle_download() {
 
     if [ "$force_download" -eq 0 ]; then
         log_info "Skill '$skill_name' is already up to date (v$current_local_version)."
-        return
+        return 0
     fi
 
     local remote_skill_file="$skill_file"

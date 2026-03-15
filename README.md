@@ -54,22 +54,32 @@ ssf-provider download mvi-architecture
 ssf-provider download mvi-architecture --minified
 ```
 
-### 3. Specify Agent(s) via Flag
+### 3. Bulk Download
+You can download all available skills or an entire folder of skills at once:
+```bash
+# Download everything in the registry
+ssf-provider download all
+
+# Download only skills in a specific folder (must end with /)
+ssf-provider download cmp/
+```
+
+### 4. Specify Agent(s) via Flag
 Bypass the configuration by specifying one or more agents (comma-separated):
 ```bash
 ssf-provider download compose-guidelines --agent=cursor,claude
 ```
 
-### 4. Update Skills
-If a remote skill is updated (new version in `versions.json`), running the download command again will automatically update your local copy for all configured agents.
+### 5. Update Skills
+If a remote skill is updated (new version in `versions.json`), running the download command again (or `download all`) will automatically update your local copies.
 
-### 5. Self-Update
+### 6. Self-Update
 Keep `ssf-provider` itself up to date:
 ```bash
 ssf-provider update
 ```
 
-### 6. MCP Server Mode
+### 7. MCP Server Mode
 Because `ssf-provider` now natively speaks JSON-RPC over stdio, you can plug it directly into tools like Claude Desktop or Cursor as an MCP (Model Context Protocol) server.
 
 #### For Claude Desktop

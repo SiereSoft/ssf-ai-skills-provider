@@ -4,7 +4,9 @@
 The SSF AI Skill Provider is a lightweight, open-source CLI tool designed for Android developers to fetch and install AI agent "skills" (contextual guardrails and architectural rules) from a central GitHub repository. It bridges the gap between standardized Android development practices and autonomous AI agents by automatically placing downloaded markdown rules into the specific local directories required by different AI models. It uses a centralized remote versions.json registry to handle precise version control and updates.
 
 ## Behavioral Contract
-*   When the user executes the download command (e.g., `./ssf-provider download <skill-name>`) without specifying an agent flag, the system interactively prompts the user to select their target AI agent from the supported registry to determine the correct local directory path.
+*   When the user executes the download command (e.g., `./ssf-provider download <skill-name|folder/|all>`) without specifying an agent flag, the system interactively prompts the user to select their target AI agent from the supported registry to determine the correct local directory path.
+*   When the user provides `all` as the download target, the system iterates through all skills defined in the remote `versions.json` and downloads them.
+*   When the user provides a path ending in `/` (e.g., `cmp/`), the system filters the registry for all skills whose `file` path starts with that prefix and downloads only those skills.
 *   When the user executes the command with the agent flag (e.g., `./ssf-provider download mvi-architecture --agent=cursor`), the system bypasses the interactive prompt and uses the specified agent.
 *   When a valid skill name and agent are provided, the system first fetches `versions.json` from the remote GitHub repository to check the current version of the requested skill.
 *   When fetching a new skill, the system downloads the corresponding raw markdown file from the remote GitHub repository, saves it strictly in `.md` format into the targeted agent's local folder, and updates a local tracking file (e.g., `.ssf-provider-versions`) with the installed version.
