@@ -7,8 +7,9 @@ set -u
 AGENT_REGISTRY_KEYS=("claude" "claude-code" "cursor" "opencode" "roo" "kilo" "windsurf" "warp" "zencoder" "codex" "gemini" "antigravity" "junie")
 AGENT_REGISTRY_VALUES=(".claude/skills/" ".claude/skills/" ".cursor/rules/" ".opencode/skills/" ".roo/rules/" ".kilocode/rules/" ".windsurf/rules/" ".warp/rules/" ".zencoder/rules/" ".codex/skills/" ".gemini/skills/" ".agent.antigravity/skills/" ".junie/")
 
-LOCAL_TRACKER_FILE=".ssf-agent-versions"
-CONFIG_FILE=".ssf-agent-config"
+LOCAL_TRACKER_FILE=".ssf-provider-versions"
+CONFIG_FILE=".ssf-provider-config"
+# Note: Ensure your remote repo has the file renamed to ssf-provider
 REMOTE_BASE_URL="${AGENT_BOOT_REMOTE_URL:-https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/main/}"
 VERSIONS_FILE="versions.json"
 
@@ -50,10 +51,10 @@ print_usage() {
     done
     agents=${agents%, }
     printf "Usage:\n" >&2
-    printf "  ./ssf-agent select                        (Configure your default AI agents)\n" >&2
-    printf "  ./ssf-agent [download] <skill> [--min]    (Download/update a skill)\n" >&2
-    printf "  ./ssf-agent update                        (Self-update the ssf-agent script)\n" >&2
-    printf "  ./ssf-agent mcp                           (Start JSON-RPC 2.0 stdio server)\n\n" >&2
+    printf "  ./ssf-provider select                        (Configure your default AI agents)\n" >&2
+    printf "  ./ssf-provider [download] <skill|folder|all> [--min] (Download/update skills)\n" >&2
+    printf "  ./ssf-provider update                        (Self-update the ssf-provider script)\n" >&2
+    printf "  ./ssf-provider mcp                           (Start JSON-RPC 2.0 stdio server)\n\n" >&2
     printf "Supported Agents: %s\n" "$agents" >&2
 }
 
@@ -171,15 +172,15 @@ version_gt() {
 
 check_dependencies() {
     if ! command -v curl &> /dev/null; then
-        log_error "curl is not installed. Please install it to use ssf-agent."
+        log_error "curl is not installed. Please install it to use ssf-provider."
         exit 1
     fi
 }
 
 handle_update() {
-    log_info "Downloading latest ssf-agent script..."
-    local script_url="${REMOTE_BASE_URL}ssf-agent"
-    local temp_file="/tmp/ssf-agent-update.$$"
+    log_info "Downloading latest ssf-provider script..."
+    local script_url="${REMOTE_BASE_URL}ssf-provider"
+    local temp_file="/tmp/ssf-provider-update.$$"
 
     if ! curl -sSfL --connect-timeout 5 "$script_url" -o "$temp_file" 2>/dev/null; then
         log_error "Failed to download update. Network unreachable or file missing."
@@ -196,18 +197,18 @@ handle_update() {
     # Check if we lack write access to the current location (e.g., /usr/local/bin)
     if [ ! -w "$(dirname "$current_script_path")" ] || ( [ -e "$current_script_path" ] && [ ! -w "$current_script_path" ] ); then
 
-        # We don't have permission. Let's do an automatic rootless migration!
+        # We don't have permission. Automatic rootless migration.
         local user_bin="$HOME/.local/bin"
 
         log_info "System-level path detected ($current_script_path)."
-        log_info "Migrating ssf-agent to user space ($user_bin) to permanently avoid sudo..."
+        log_info "Migrating ssf-provider to user space ($user_bin) to permanently avoid sudo..."
 
         mkdir -p "$user_bin"
 
-        if mv "$temp_file" "$user_bin/ssf-agent" 2>/dev/null; then
-            chmod +x "$user_bin/ssf-agent"
-            log_success "Success! ssf-agent is now running entirely rootless."
-            log_success "-> New location: $user_bin/ssf-agent"
+        if mv "$temp_file" "$user_bin/ssf-provider" 2>/dev/null; then
+            chmod +x "$user_bin/ssf-provider"
+            log_success "Success! ssf-provider is now running entirely rootless."
+            log_success "-> New location: $user_bin/ssf-provider"
             log_info "Note: If $user_bin is not in your PATH, you may need to add it."
             exit 0
         else
@@ -220,13 +221,13 @@ handle_update() {
     # Standard in-place update if the script is ALREADY in a user-owned folder
     if ! mv "$temp_file" "$current_script_path" 2>/dev/null; then
         log_error "Failed to write the updated file to $current_script_path."
-        log_info "If this is a system path, try running with sudo once to migrate: sudo ssf-agent update"
+        log_info "If this is a system path, try running with sudo once to migrate: sudo ssf-provider update"
         rm -f "$temp_file"
         exit 1
     fi
 
     chmod +x "$current_script_path"
-    log_success "ssf-agent successfully updated to the latest version!"
+    log_success "ssf-provider successfully updated to the latest version!"
 }
 
 handle_download() {
@@ -234,17 +235,71 @@ handle_download() {
         print_usage
         exit 1
     fi
-    local skill_name=$1
+    local query=$1
     local target_agents_str=""
     local use_minified=0
+    local agent_args=""
 
     for arg in "$@"; do
         if [[ "$arg" == --agent=* ]]; then
             target_agents_str="${arg#--agent=}"
+            agent_args="$arg"
         elif [[ "$arg" == "--minified" || "$arg" == "-m" || "$arg" == "--min" ]]; then
             use_minified=1
         fi
     done
+
+    # Fetch registry once for the entire session
+    log_info "Fetching remote registry..."
+    local remote_registry
+    remote_registry=$(curl -sSfL --connect-timeout 5 "$REMOTE_BASE_URL$VERSIONS_FILE" 2>/dev/null || true)
+
+    if [[ -z "$remote_registry" ]]; then
+        log_error "Network unreachable or file missing. Cannot fetch skills."
+        exit 1
+    fi
+
+    local -a skills_to_download=()
+
+    if [[ "$query" == "all" ]]; then
+        log_info "Preparing to download all skills..."
+        # Extract all skill keys, excluding the root "skills" key
+        while IFS= read -r line; do
+            if [[ "$line" != "skills" ]]; then
+                skills_to_download+=("$line")
+            fi
+        done < <(printf "%s" "$remote_registry" | grep -o '"[^"]*": *{' | cut -d'"' -f2)
+    elif [[ "$query" == */ ]]; then
+        local folder_prefix="${query%/}"
+        log_info "Preparing to download skills in folder '$folder_prefix'..."
+        # Extract skills that have files starting with folder_prefix/
+        while IFS= read -r skill_key; do
+            local file_path
+            file_path=$(printf "%s" "$remote_registry" | awk "/\"$skill_key\":/,/\}/" | grep -o '"file": *"[^"]*"' | cut -d'"' -f4)
+            if [[ "$file_path" == "$folder_prefix/"* ]]; then
+                skills_to_download+=("$skill_key")
+            fi
+        done < <(printf "%s" "$remote_registry" | grep -o '"[^"]*": *{' | cut -d'"' -f2)
+    else
+        # Assume it's a single skill
+        skills_to_download+=("$query")
+    fi
+
+    if [ ${#skills_to_download[@]} -eq 0 ]; then
+        log_error "No skills found matching '$query'."
+        exit 1
+    fi
+
+    for skill_name in "${skills_to_download[@]}"; do
+        download_single_skill "$skill_name" "$target_agents_str" "$use_minified" "$remote_registry"
+    done
+}
+
+download_single_skill() {
+    local skill_name=$1
+    local target_agents_str=$2
+    local use_minified=$3
+    local remote_registry=$4
 
     if [ -z "$target_agents_str" ]; then
         target_agents_str=$(get_configured_agents)
@@ -263,20 +318,11 @@ handle_download() {
     local -a target_agents
     IFS=',' read -r -a target_agents <<< "$target_agents_str"
 
-    log_info "Fetching remote registry..."
-    local remote_registry
-    remote_registry=$(curl -sSfL --connect-timeout 5 "$REMOTE_BASE_URL$VERSIONS_FILE" 2>/dev/null || true)
-
-    if [[ -z "$remote_registry" ]]; then
-        log_error "Network unreachable or file missing. Cannot fetch skills."
-        exit 1
-    fi
-
     local skill_block
     skill_block=$(printf "%s" "$remote_registry" | awk "/\"$skill_name\":/,/\}/")
     if [ -z "$skill_block" ]; then
         log_error "Skill '$skill_name' not found in repository."
-        exit 1
+        return 1
     fi
 
     # Strip hidden characters from remote parsing
@@ -287,7 +333,7 @@ handle_download() {
 
     if [ -z "$remote_version" ] || [ -z "$skill_file" ]; then
          log_error "Skill '$skill_name' not found in repository."
-         exit 1
+         return 1
     fi
 
     # Strip hidden characters from local tracking file
@@ -318,7 +364,7 @@ handle_download() {
 
     if [ "$force_download" -eq 0 ]; then
         log_info "Skill '$skill_name' is already up to date (v$current_local_version)."
-        return
+        return 0
     fi
 
     local remote_skill_file="$skill_file"
@@ -358,15 +404,12 @@ handle_download() {
             exit 1
         fi
 
-        # The target_dir already includes a trailing slash (e.g. .claude/skills/)
-        # skill_file might now contain a category path (e.g. android/mvi-architecture.md)
         local target_file_path="${target_dir}${skill_file##*/}"
         if ! printf "%s\n" "$skill_content" > "$target_file_path" 2>/dev/null; then
             log_error "Failed to write file to $PWD/$target_file_path"
             exit 1
         fi
 
-        # Log the absolute path so we know exactly where it landed
         log_info " -> Placed in $PWD/$target_file_path"
     done
 
@@ -399,7 +442,7 @@ handle_mcp() {
 
         case "$method" in
             "initialize")
-                printf '{"jsonrpc": "2.0", "id": %s, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "ssf-agent-mcp", "version": "1.0.0"}}}\n' "$id"
+                printf '{"jsonrpc": "2.0", "id": %s, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "ssf-provider-mcp", "version": "1.0.0"}}}\n' "$id"
                 ;;
             "tools/list")
                 printf '{"jsonrpc": "2.0", "id": %s, "result": {"tools": [{"name": "download_skill", "description": "Download an AI skill/rule from the organizational registry directly into the local project structure.", "inputSchema": {"type": "object", "properties": {"skill_name": {"type": "string", "description": "The exact name of the skill to fetch"}}, "required": ["skill_name"]}}]}}\n' "$id"

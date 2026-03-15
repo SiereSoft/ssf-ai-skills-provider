@@ -22,18 +22,18 @@ AI agents are powerful but prone to hallucinations when they don't have project-
 ## Installation
 
 ### Method 1: Rootless (Recommended)
-Install `ssf-agent` directly into your user-space binary folder. This avoids the need for `sudo` now and in the future:
+Install `ssf-provider` directly into your user-space binary folder. This avoids the need for `sudo` now and in the future:
 
 ```bash
-mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/main/ssf-agent -o ~/.local/bin/ssf-agent && chmod +x ~/.local/bin/ssf-agent
+mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/main/ssf-provider -o ~/.local/bin/ssf-provider && chmod +x ~/.local/bin/ssf-provider
 ```
 *Note: Ensure `~/.local/bin` is in your `PATH`.*
 
 ### Method 2: Global
-If you prefer a global installation, you can still use the traditional method. `ssf-agent` will automatically offer to migrate to user-space during its first update to eliminate `sudo` friction:
+If you prefer a global installation, you can still use the traditional method. `ssf-provider` will automatically offer to migrate to user-space during its first update to eliminate `sudo` friction:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/main/ssf-agent -o ssf-agent && chmod +x ssf-agent && sudo mv ssf-agent /usr/local/bin/ssf-agent
+curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/main/ssf-provider -o ssf-provider && chmod +x ssf-provider && sudo mv ssf-provider /usr/local/bin/ssf-provider
 ```
 
 *Note: Requires `curl` to be installed on your system.*
@@ -43,34 +43,44 @@ curl -sSL https://raw.githubusercontent.com/SiereSoft/ssf-ai-skills-provider/mai
 ### 1. Configure Default Agents
 Set up your preferred AI agents once to avoid repeated prompts:
 ```bash
-ssf-agent select
+ssf-provider select
 ```
 
 ### 2. Simple Download
 Download a skill to your configured agents:
 ```bash
-ssf-agent download mvi-architecture
+ssf-provider download mvi-architecture
 # or download the minified version to save tokens
-ssf-agent download mvi-architecture --minified
+ssf-provider download mvi-architecture --minified
 ```
 
-### 3. Specify Agent(s) via Flag
+### 3. Bulk Download
+You can download all available skills or an entire folder of skills at once:
+```bash
+# Download everything in the registry
+ssf-provider download all
+
+# Download only skills in a specific folder (must end with /)
+ssf-provider download cmp/
+```
+
+### 4. Specify Agent(s) via Flag
 Bypass the configuration by specifying one or more agents (comma-separated):
 ```bash
-ssf-agent download compose-guidelines --agent=cursor,claude
+ssf-provider download compose-guidelines --agent=cursor,claude
 ```
 
-### 4. Update Skills
-If a remote skill is updated (new version in `versions.json`), running the download command again will automatically update your local copy for all configured agents.
+### 5. Update Skills
+If a remote skill is updated (new version in `versions.json`), running the download command again (or `download all`) will automatically update your local copies.
 
-### 5. Self-Update
-Keep `ssf-agent` itself up to date:
+### 6. Self-Update
+Keep `ssf-provider` itself up to date:
 ```bash
-ssf-agent update
+ssf-provider update
 ```
 
-### 6. MCP Server Mode
-Because `ssf-agent` now natively speaks JSON-RPC over stdio, you can plug it directly into tools like Claude Desktop or Cursor as an MCP (Model Context Protocol) server.
+### 7. MCP Server Mode
+Because `ssf-provider` now natively speaks JSON-RPC over stdio, you can plug it directly into tools like Claude Desktop or Cursor as an MCP (Model Context Protocol) server.
 
 #### For Claude Desktop
 Add the script to your `claude_desktop_config.json`. We recommend using the rootless path:
@@ -79,7 +89,7 @@ Add the script to your `claude_desktop_config.json`. We recommend using the root
 {
   "mcpServers": {
     "ssf-provider": {
-      "command": "/Users/YOUR_USER/.local/bin/ssf-agent",
+      "command": "/Users/YOUR_USER/.local/bin/ssf-provider",
       "args": ["mcp"]
     }
   }
@@ -91,7 +101,7 @@ Add the script to your `claude_desktop_config.json`. We recommend using the root
 2. Click **+ Add New MCP Server**.
 3. Name: `ssf-provider`
 4. Type: `command`
-5. Command: `/Users/YOUR_USER/.local/bin/ssf-agent mcp`
+5. Command: `/Users/YOUR_USER/.local/bin/ssf-provider mcp`
 
 ## Supported AI Agents
 
@@ -117,17 +127,17 @@ The tool automatically maps skills to the correct directory for these agents:
 ## Minified skills and Git pre-commit hook
 
 ### Download a minified version of a skill
-You can ask `ssf-agent` to fetch the pre-minified variant of a skill (when available) using the `--minified` flag:
+You can ask `ssf-provider` to fetch the pre-minified variant of a skill (when available) using the `--minified` flag:
 
 ```bash
-ssf-agent download mvi-architecture --minified
+ssf-provider download mvi-architecture --minified
 # or the short form
-ssf-agent download mvi-architecture -m
+ssf-provider download mvi-architecture -m
 ```
 
 - You can combine this with `--agent`:
 ```bash
-ssf-agent download compose-guidelines --minified --agent=cursor,claude
+ssf-provider download compose-guidelines --minified --agent=cursor,claude
 ```
 - If a minified file does not exist yet for a given skill, the tool will print a hint to retry without `--minified`.
 - Even when downloading a minified file, it is saved locally using the standard filename from the registry (for example `mvi-architecture.md`).
